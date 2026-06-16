@@ -85,8 +85,15 @@ def _transform_providers(provider_data):
     return PD
 
 
-def _transform_data_summary(ds_data):
-    """Pass-through for the Data Summary payload, normalizing the state label."""
+def _transform_data_summary(ds_data, provider_data):
+    """Pass-through for the Data Summary payload, normalizing the state label and
+    joining each provider's title/role (ptype) from the provider feed by (office,
+    provider) — the role is not carried on the Data Summary structure itself."""
+    role_map = {}
+    for od in provider_data:
+        for p in od["providers"]:
+            if not p.get("is_other"):
+                role_map[(od["office"], p["name"])] = p.get("ptype")
     out = []
     for o in ds_data:
         out.append({
@@ -94,7 +101,9 @@ def _transform_data_summary(ds_data):
             "state":     o["state"] or "—",
             "metrics":   o["metrics"],
             "providers": [
-                {"name": p["name"], "metrics": p["metrics"]}
+                {"name": p["name"],
+                 "role": role_map.get((o["office"], p["name"])),
+                 "metrics": p["metrics"]}
                 for p in o["providers"]
             ],
         })
@@ -120,7 +129,7 @@ def _t2_options(office_data):
 def generate_html(office_data, provider_data, data_summary):
     D, OTHER = _transform_offices(office_data)
     PD       = _transform_providers(provider_data)
-    DS       = _transform_data_summary(data_summary)
+    DS       = _transform_data_summary(data_summary, provider_data)
 
     D_json     = json.dumps(D,     ensure_ascii=False, separators=(",", ":"))
     OTHER_json = json.dumps(OTHER, ensure_ascii=False, separators=(",", ":"))
@@ -245,22 +254,94 @@ td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
 .trend-legend .tl-item{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .trend-legend .tl-div{width:1px;height:16px;background:#ddd;margin:0 4px}
 .hm-swatch{display:inline-block;width:28px;height:12px;border-radius:2px;vertical-align:middle;margin-right:3px}
-/* Tab 4 — Data Summary ("show your work") */
-.ds-block{margin-bottom:18px;border:0.5px solid #ddd;border-radius:8px;overflow:hidden}
-table.ds{width:100%;border-collapse:collapse;table-layout:fixed}
-table.ds th{font-size:10px;background:#fafafa;color:#666;padding:6px 6px;border-bottom:1.5px solid #ddd;text-align:right;white-space:nowrap}
-table.ds th.l{text-align:left}
-table.ds td{font-size:11px;padding:5px 6px;text-align:right;border-bottom:0.5px solid #f0f0f0;white-space:nowrap}
-table.ds td.l{text-align:left}
-.ds-hdr td{padding:8px 12px;font-size:13px;font-weight:600;text-align:left;border:none}
-.ds-hdr.office td{background:#1F3864;color:#fff}
-.ds-hdr.provider td{background:#2E4D8A;color:#fff}
-.ds-hdr .ds-state{font-weight:400;opacity:.75;font-size:11px;margin-left:6px}
-.ds-y25 td{background:#eef3fb}
-.ds-y26 td{background:#fff}
-.ds-metric{font-weight:600;color:#1F3864}
-.ds-ytd{border-left:1.5px solid #d5dce8;font-weight:700}
-.ds-sub{font-size:11px;color:#888;font-weight:400;padding:6px 12px;background:#f6f8fc;border-bottom:0.5px solid #e5e9f2}
+/* Tab 4 — Data Summary (office-anchored roster redesign) */
+#tab4{
+  --t4-line:#e2e8f0;--t4-ink:#1f2a44;--t4-soft:#5a6b85;--t4-faint:#94a3b8;--t4-zebra:#f5f8fc;
+  --t4-up:#1a7a4a;--t4-up-bg:#e6f4ec;--t4-down:#C0392B;--t4-down-bg:#fbecea;--t4-accent:#2E4D8A;
+  --t4-beat:#0e7490;--t4-beat-bg:#e0f2f9;--t4-trail:#b45309;--t4-trail-bg:#fbeede;
+}
+#tab4 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+#tab4 .t4up{color:var(--t4-up)} #tab4 .t4down{color:var(--t4-down)}
+#tab4 .beat{color:var(--t4-beat)} #tab4 .trail{color:var(--t4-trail)}
+#tab4 .t4-prompt{padding:40px 24px;text-align:center;color:#888}
+#tab4 .t4-prompt .ic{font-size:32px;margin-bottom:10px}
+#tab4 .anchor{position:sticky;top:0;z-index:20;margin-bottom:16px}
+#tab4 .anchor-card{background:#fff;border:0.5px solid #ddd;border-radius:8px;box-shadow:0 6px 18px -10px rgba(20,40,74,.45);overflow:hidden}
+#tab4 .anchor-head{background:#1F3864;color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+#tab4 .anchor-head .who{font-weight:600;font-size:14px}
+#tab4 .anchor-head .who small{font-weight:400;color:#c4d2e8;margin-left:8px;font-size:11px}
+#tab4 .anchor-head .pin{font-size:10px;color:#aebfd8}
+#tab4 .strip{display:grid;grid-template-columns:repeat(7,1fr)}
+#tab4 .chip{padding:9px 11px;border-right:0.5px solid var(--t4-line)}
+#tab4 .chip:last-child{border-right:none}
+#tab4 .chip .m{font-size:10px;color:var(--t4-soft);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+#tab4 .chip .v{font-size:16px;font-weight:600;letter-spacing:-.2px}
+#tab4 .chip .d{font-size:11px;font-weight:600;margin-top:2px}
+#tab4 .chip .base{font-size:10px;color:var(--t4-faint);margin-top:1px}
+#tab4 .pill{display:inline-block;padding:1px 6px;border-radius:5px;font-weight:600}
+#tab4 .pill.t4up{background:var(--t4-up-bg)} #tab4 .pill.t4down{background:var(--t4-down-bg)}
+#tab4 .anchor-foot{border-top:0.5px solid var(--t4-line);padding:7px 16px;background:var(--t4-zebra)}
+#tab4 .lnk{background:none;border:none;color:var(--t4-accent);font:inherit;font-weight:600;cursor:pointer;padding:2px 4px}
+#tab4 .lnk:hover{text-decoration:underline}
+#tab4 .grid-wrap{padding:0 4px 6px}
+#tab4 table.grid{width:100%;border-collapse:collapse;font-size:12px}
+#tab4 table.grid th,#tab4 table.grid td{padding:6px 11px;text-align:right;border-bottom:0.5px solid var(--t4-line);background:#fff}
+#tab4 table.grid th{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--t4-soft);background:#f0f4f9;font-weight:600}
+#tab4 table.grid th.metric,#tab4 table.grid td.metric{text-align:left;font-weight:600;color:#1F3864}
+#tab4 table.grid td.ytd,#tab4 table.grid th.ytd{background:#eef3fa;font-weight:600}
+#tab4 .cell .v{font-weight:600}
+#tab4 .cell .d{font-size:10px;font-weight:600;margin-top:1px}
+#tab4 .cell.full .g25,#tab4 .cell.full .g26{font-size:10px;color:var(--t4-faint)}
+#tab4 .cell.full .gd{font-size:11px;font-weight:700;margin-top:1px}
+#tab4 .cell .tag{font-size:9px;font-weight:700;color:var(--t4-faint);letter-spacing:.3px;margin-right:4px}
+#tab4 .gapref{font-size:9px;color:var(--t4-faint);margin-top:1px}
+#tab4 .roster-bar{display:flex;align-items:center;justify-content:space-between;margin:4px 2px 8px;gap:14px;flex-wrap:wrap}
+#tab4 .roster-bar h2{font-size:13px;margin:0;color:var(--t4-ink);font-weight:600}
+#tab4 .roster-bar h2 small{color:var(--t4-faint);font-weight:400;margin-left:6px}
+#tab4 .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#tab4 .seg{display:inline-flex;border:1px solid #cbd5e1;border-radius:7px;overflow:hidden}
+#tab4 .seg button{font:inherit;font-size:11px;font-weight:600;border:none;background:#fff;color:var(--t4-soft);padding:6px 12px;cursor:pointer}
+#tab4 .seg button.on{background:#1F3864;color:#fff}
+#tab4 .seg.sm button{padding:5px 10px}
+#tab4 .movers{display:flex;gap:10px;flex-wrap:wrap;margin:0 2px 12px}
+#tab4 .mcard{flex:1;min-width:230px;background:#fff;border:0.5px solid #ddd;border-left-width:4px;border-radius:8px;padding:9px 13px}
+#tab4 .mcard.trail{border-left-color:var(--t4-trail)} #tab4 .mcard.beat{border-left-color:var(--t4-beat)}
+#tab4 .mcard .ml{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--t4-faint);font-weight:700;margin-bottom:2px}
+#tab4 .mcard .mn{font-weight:600;font-size:13px}
+#tab4 .mcard .mn small{font-weight:400;color:var(--t4-faint);margin-left:5px;font-size:11px}
+#tab4 .mcard .mg{font-size:12px;margin-top:3px}
+#tab4 .bpill{display:inline-block;padding:1px 6px;border-radius:5px;font-weight:600}
+#tab4 .bpill.beat{background:var(--t4-beat-bg)} #tab4 .bpill.trail{background:var(--t4-trail-bg)}
+#tab4 .roster{background:#fff;border:0.5px solid #ddd;border-radius:8px;overflow:hidden}
+#tab4 table.rost{width:100%;border-collapse:collapse}
+#tab4 table.rost thead th{background:#1F3864;color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.4px;padding:9px 11px;text-align:right;cursor:pointer;user-select:none;font-weight:600;white-space:nowrap}
+#tab4 table.rost thead th.name{text-align:left}
+#tab4 table.rost thead th .arrow{opacity:.5;font-size:9px;margin-left:4px;color:#fff}
+#tab4 table.rost thead th.sorted .arrow{opacity:1}
+#tab4 table.rost tbody td{padding:8px 11px;text-align:right;border-bottom:0.5px solid var(--t4-line);white-space:nowrap;background:#fff}
+#tab4 table.rost tbody tr.prov{cursor:pointer}
+#tab4 table.rost tbody tr.prov:hover td{background:#e9f0fa}
+#tab4 td.name{text-align:left;font-weight:600}
+#tab4 td.name .tw{display:inline-block;width:14px;color:var(--t4-faint)}
+#tab4 tr.prov.open td.name .tw{color:var(--t4-accent)}
+#tab4 td.name .pn{display:block}
+#tab4 td.name .role{display:block;margin-left:14px;font-size:10px;color:var(--t4-faint);font-weight:500}
+#tab4 .big{font-weight:600} #tab4 .dcell .big{font-size:13px}
+#tab4 .sub{font-size:10px;color:var(--t4-faint)}
+#tab4 .flag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 5px;border-radius:4px;margin-left:6px;text-transform:uppercase}
+#tab4 .flag.beat{background:var(--t4-beat-bg);color:var(--t4-beat)} #tab4 .flag.trail{background:var(--t4-trail-bg);color:var(--t4-trail)}
+#tab4 tr.drill td{padding:0;background:#fbfcfe;border-bottom:0.5px solid var(--t4-line)}
+#tab4 tr.drill .inner{padding:6px 14px 14px}
+#tab4 tr.drill .dh{font-size:10px;color:var(--t4-soft);text-transform:uppercase;letter-spacing:.4px;padding:10px 2px 4px}
+#tab4 .legend{font-size:11px;color:var(--t4-faint);margin:12px 2px 0;display:flex;gap:18px;flex-wrap:wrap}
+#tab4 .legend b{color:var(--t4-soft)}
+#tab4 .hide{display:none}
+#tab4 .lnk:focus-visible,#tab4 .seg button:focus-visible,#tab4 table.rost thead th:focus-visible,#tab4 tr.prov:focus-visible{outline:2px solid var(--t4-accent);outline-offset:-2px}
+@media(max-width:880px){
+  #tab4 .strip{grid-template-columns:repeat(2,1fr)}
+  #tab4 .chip{border-bottom:0.5px solid var(--t4-line)}
+  #tab4 .roster,#tab4 .anchor-card{overflow-x:auto}
+}
 /* Tab 2 provider table */
 table.pt{table-layout:fixed;font-size:11px}
 table.pt th{font-size:10px;background:#eef0ff;padding:5px}
@@ -1128,119 +1209,242 @@ function togT3(key,r){
   }
 }
 
-// ── TAB 4 — DATA SUMMARY (show your work) ─────────────────────────────────────
+// ── TAB 4 — DATA SUMMARY (office-anchored roster) ─────────────────────────────
 var T4_METRICS=[
-  {key:'np',     label:'Net Production', fmt:'cur'},
-  {key:'visits', label:'Visits',        fmt:'int'},
-  {key:'drdays', label:'Doctor Days',   fmt:'dec'},
-  {key:'newpat', label:'New Patients',  fmt:'int'},
-  {key:'spv',    label:'$/Visit',       fmt:'cur'},
-  {key:'vdd',    label:'Vis/DrDay',     fmt:'dec'},
-  {key:'rpd',    label:'Rev/Day',       fmt:'cur'}
+  {key:'np',name:'Net Production',fmt:'money'},{key:'visits',name:'Visits',fmt:'int'},
+  {key:'drdays',name:'Doctor Days',fmt:'dec1'},{key:'newpat',name:'New Patients',fmt:'int'},
+  {key:'spv',name:'$/Visit',fmt:'money'},{key:'vdd',name:'Vis/DrDay',fmt:'dec2'},
+  {key:'rpd',name:'Rev/Day',fmt:'money'}
 ];
-function t4fmt(v,fmt){return fmt==='cur'?fd(v):(fmt==='int'?fn(v):fv(v));}
+var T4_MO=['Jan','Feb','Mar','Apr','May'];
+var T4_HEAD='Net Production';   // divergence headline metric
+var T4_THRESH=10;               // lift/drag threshold (percentage points)
+var t4Mode='value', t4Detail='compact', t4SortKey='Net Production', t4SortDir=-1;
+var t4OfficeOpen=false, t4OpenSet={}, t4ScrollTo=null;
 
-// One metric × one year row (6 value cells: Jan..May + YTD Total).
-function t4Row(label,year,arr,fmt,yclass){
-  var cells='';
-  for(var i=0;i<6;i++){
-    cells+='<td class="'+(i===5?'ds-ytd':'')+'">'+t4fmt(arr[i],fmt)+'</td>';
-  }
-  return '<tr class="'+yclass+'">'
-    +'<td class="l ds-metric">'+label+'</td>'
-    +'<td class="l">'+year+'</td>'
-    +cells+'</tr>';
+function t4Reset(){t4OfficeOpen=false;t4OpenSet={};t4SortKey='Net Production';t4SortDir=-1;}
+function t4esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');}
+function t4f(v,kind){
+  if(v==null)return '&mdash;';
+  if(kind==='money')return (v<0?'&minus;$':'$')+Math.abs(Math.round(v)).toLocaleString();
+  if(kind==='int')return (v<0?'&minus;':'')+Math.abs(Math.round(v)).toLocaleString();
+  if(kind==='dec1')return (v<0?'&minus;':'')+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1});
+  if(kind==='dec2')return (v<0?'&minus;':'')+Math.abs(v).toFixed(2);
+  return v;
+}
+function t4pct(cur,prev){ if(cur==null||prev==null)return null; if(prev<=0)return 'N/M'; return (cur-prev)/prev*100; }
+function t4ar(p){return p>=0?'&#9650;':'&#9660;';}                     // ▲ ▼
+function t4num(x){return (x==null||x==='N/M')?-Infinity:x;}
+function t4pctSpan(p){
+  if(p==null)return '<span style="color:#bbb">&mdash;</span>';
+  if(p==='N/M')return '<span class="nm" title="Not Meaningful — 2025 baseline is zero or negative">N/M</span>';
+  return '<span class="'+(p>=0?'t4up':'t4down')+'">'+t4ar(p)+' '+Math.abs(p).toFixed(1)+'%</span>';
+}
+function t4Entity(metrics){
+  function side(y){var o={};for(var k=0;k<T4_METRICS.length;k++){var m=T4_METRICS[k],a=metrics[y][m.key]||[];
+    o[m.name]={mo:a.slice(0,5),ytd:a.length>5?a[5]:null,fmt:m.fmt};}return o;}
+  return {y25:side('y1'),y26:side('y2')};
 }
 
-// One grouped data block (office or provider): header + 7 metrics × 2 years.
-function t4Block(name,state,metrics,isProvider){
-  var thead='<tr><th class="l" style="width:16%">Metric</th><th class="l" style="width:9%">Year</th>'
-    +'<th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th><th>May</th><th class="ds-ytd">YTD Total</th></tr>';
-  var hdrCls=isProvider?'ds-hdr provider':'ds-hdr office';
-  var st=(state&&state!=='&mdash;'&&state!=='—')?'<span class="ds-state">'+state+'</span>':'';
-  var rows='<tr class="'+hdrCls+'"><td colspan="8">'+name+st+'</td></tr>';
-  rows+=thead;
-  for(var m=0;m<T4_METRICS.length;m++){
-    var mt=T4_METRICS[m];
-    rows+=t4Row(mt.label,'2025',metrics.y1[mt.key],mt.fmt,'ds-y25');
-    rows+=t4Row('',      '2026',metrics.y2[mt.key],mt.fmt,'ds-y26');
+/* perspective strip + office monthly grid */
+function t4AnchorHTML(o,off){
+  var chips='';
+  for(var i=0;i<T4_METRICS.length;i++){
+    var m=T4_METRICS[i],nm=m.name,cur=off.y26[nm].ytd,prev=off.y25[nm].ytd,p=t4pct(cur,prev),pill;
+    if(p==null)pill='<span style="color:#bbb">&mdash;</span>';
+    else if(p==='N/M')pill='<span class="nm">N/M</span>';
+    else pill='<span class="pill '+(p>=0?'t4up':'t4down')+'">'+t4ar(p)+' '+Math.abs(p).toFixed(1)+'%</span>';
+    chips+='<div class="chip"><div class="m">'+nm+'</div><div class="v num">'+t4f(cur,m.fmt)+'</div>'
+      +'<div class="d num">'+pill+'</div><div class="base num">vs '+t4f(prev,m.fmt)+" '25</div></div>";
   }
-  return '<div class="ds-block"><table class="ds">'+rows+'</table></div>';
+  var st=(o.state&&o.state!=='—'&&o.state!=='&mdash;')?o.state+' &bull; ':'';
+  return '<div class="anchor"><div class="anchor-card">'
+    +'<div class="anchor-head"><div class="who">'+o.office+' <small>'+st+'office total &bull; '
+      +o.providers.length+' named provider'+(o.providers.length===1?'':'s')+'</small></div>'
+    +'<div class="pin">&#128204; stays pinned while you scroll</div></div>'
+    +'<div class="strip">'+chips+'</div>'
+    +'<div class="anchor-foot"><button type="button" class="lnk" id="t4OfficeToggle" aria-expanded="'+(t4OfficeOpen?'true':'false')+'">'
+      +(t4OfficeOpen?'Hide monthly detail &#9662;':'Show monthly detail &#9656;')+'</button></div>'
+    +'<div class="grid-wrap'+(t4OfficeOpen?'':' hide')+'">'+t4GridHTML(off,null,false)+'</div></div></div>';
+}
+
+/* delta-forward monthly grid (compact | full); vsOffice adds YTD reference */
+function t4GridCell(cur,prev,kind,isYtd,offRef){
+  var p=t4pct(cur,prev),ref='';
+  if(offRef!==undefined){
+    if(p==='N/M'||p==null||offRef==='N/M'||offRef==null){ref='<div class="gapref num">vs office N/M</div>';}
+    else{var gap=p-offRef,beat=gap>=0;
+      ref='<div class="gapref num">vs office '+(offRef>=0?'&#9650;':'&#9660;')+Math.abs(offRef).toFixed(1)
+        +'% &bull; <span class="'+(beat?'beat':'trail')+'">'+(beat?'+':'&minus;')+Math.abs(gap).toFixed(1)+' pts</span></div>';}
+  }
+  if(t4Detail==='full'){
+    var diff=(cur!=null&&prev!=null)?cur-prev:null;
+    var dcls=diff==null?'':(diff>=0?'t4up':'t4down');
+    var dstr=diff==null?'&mdash;':((diff>=0?'&#9650; ':'&#9660; ')+t4f(Math.abs(diff),kind));
+    return '<td class="cell full'+(isYtd?' ytd':'')+'"><div class="g25 num"><span class="tag">25</span>'+t4f(prev,kind)+'</div>'
+      +'<div class="g26 num"><span class="tag">26</span>'+t4f(cur,kind)+'</div>'
+      +'<div class="gd num '+dcls+'">'+dstr+'</div>'+ref+'</td>';
+  }
+  return '<td class="cell'+(isYtd?' ytd':'')+'"><div class="v num">'+t4f(cur,kind)+'</div>'
+    +'<div class="d num">'+t4pctSpan(p)+'</div>'+ref+'</td>';
+}
+function t4GridHTML(ent,officeDelta,vsOffice){
+  var lbl=t4Detail==='full'?"Metric (2025 &middot; 2026 &middot; &Delta;)":"Metric (2026, &Delta; vs '25)";
+  var head='<tr><th class="metric">'+lbl+'</th>';
+  for(var i=0;i<T4_MO.length;i++)head+='<th>'+T4_MO[i]+'</th>';
+  head+='<th class="ytd">YTD</th></tr>';
+  var rows='';
+  for(var k=0;k<T4_METRICS.length;k++){
+    var m=T4_METRICS[k],nm=m.name,b=ent.y26[nm],a=ent.y25[nm],cells='';
+    for(var j=0;j<5;j++)cells+=t4GridCell(b.mo[j],a.mo[j],m.fmt,false,undefined);
+    cells+=t4GridCell(b.ytd,a.ytd,m.fmt,true,(vsOffice&&officeDelta)?officeDelta[nm]:undefined);
+    rows+='<tr><td class="metric">'+nm+'</td>'+cells+'</tr>';
+  }
+  return '<table class="grid">'+head+rows+'</table>';
+}
+
+/* movers band — biggest drag / top lift on the headline metric vs office */
+function t4MoversHTML(provs,officeDelta){
+  var M=T4_HEAD,offD=officeDelta[M];
+  if(offD==='N/M'||offD==null)
+    return '<div class="movers"><div class="mcard"><div class="ml">Movers</div>'
+      +'<div class="mg">Office '+M+' baseline is non-meaningful — vs-office comparison unavailable.</div></div></div>';
+  var rows=[];
+  for(var i=0;i<provs.length;i++){var pr=t4pct(provs[i].e.y26[M].ytd,provs[i].e.y25[M].ytd);
+    if(pr==='N/M'||pr==null)continue;rows.push({p:provs[i],prov:pr,gap:pr-offD});}
+  if(!rows.length)return '';
+  function card(d,kind,label){var beat=kind==='beat';
+    return '<div class="mcard '+kind+'"><div class="ml">'+label+'</div>'
+      +'<div class="mn">'+d.p.name+(d.p.role?'<small>'+d.p.role+'</small>':'')+'</div>'
+      +'<div class="mg"><span class="bpill '+kind+'">'+(beat?'&#9650;':'&#9660;')+' '+Math.abs(d.gap).toFixed(1)+' pts vs office</span></div>'
+      +'<div class="gapref num">'+M+': provider '+(d.prov>=0?'&#9650;':'&#9660;')+Math.abs(d.prov).toFixed(1)
+      +'% &bull; office '+(offD>=0?'&#9650;':'&#9660;')+Math.abs(offD).toFixed(1)+'%</div></div>';}
+  if(rows.length===1)return '<div class="movers">'+card(rows[0],rows[0].gap>=0?'beat':'trail',rows[0].gap>=0?'Top lift on the office':'Biggest drag on the office')+'</div>';
+  var drag=rows.slice().sort(function(a,b){return a.gap-b.gap;})[0];
+  var lift=rows.slice().sort(function(a,b){return b.gap-a.gap;})[0];
+  return '<div class="movers">'+card(drag,'trail','Biggest drag on the office')+card(lift,'beat','Top lift on the office')+'</div>';
+}
+
+function t4RosterBarHTML(){
+  return '<div class="roster-bar"><h2>Providers <small>click any row to expand the full monthly detail</small></h2>'
+    +'<div class="controls"><div class="seg" id="t4ModeSeg">'
+    +'<button type="button" data-mode="value" class="'+(t4Mode==='value'?'on':'')+'">Value</button>'
+    +'<button type="button" data-mode="gap" class="'+(t4Mode==='gap'?'on':'')+'">Gap vs office</button></div>'
+    +'<div class="seg sm" id="t4DetailSeg">'
+    +'<button type="button" data-detail="compact" class="'+(t4Detail==='compact'?'on':'')+'">Compact</button>'
+    +'<button type="button" data-detail="full" class="'+(t4Detail==='full'?'on':'')+'">Full 25&middot;26&middot;&Delta;</button></div></div></div>';
+}
+
+function t4SortVal(ent,key,officeDelta){
+  if(key==='name')return ent.name.toLowerCase();
+  var cur=ent.e.y26[key].ytd;
+  if(t4Mode==='gap'){var p=t4pct(cur,ent.e.y25[key].ytd),od=officeDelta[key];
+    if(p==='N/M'||p==null||od==='N/M'||od==null)return -Infinity;return p-od;}
+  return t4num(cur);
+}
+function t4RosterHTML(shown,officeDelta){
+  var list=shown.slice().sort(function(A,B){var a=t4SortVal(A,t4SortKey,officeDelta),b=t4SortVal(B,t4SortKey,officeDelta);
+    if(typeof a==='string')return a<b?-1*t4SortDir:a>b?1*t4SortDir:0; return (a-b)*t4SortDir;});
+  var arr=function(k){return t4SortKey===k?(t4SortDir>0?'&#9650;':'&#9660;'):'&#8597;';};
+  var head='<th class="name'+(t4SortKey==='name'?' sorted':'')+'" data-k="name" tabindex="0" role="columnheader">Provider <span class="arrow">'+arr('name')+'</span></th>';
+  for(var i=0;i<T4_METRICS.length;i++){var nm=T4_METRICS[i].name;
+    head+='<th class="'+(t4SortKey===nm?'sorted':'')+'" data-k="'+nm+'" tabindex="0" role="columnheader">'+nm+' <span class="arrow">'+arr(nm)+'</span></th>';}
+  var body='';
+  for(var r=0;r<list.length;r++){
+    var ent=list[r],tds='';
+    for(var k=0;k<T4_METRICS.length;k++){
+      var m=T4_METRICS[k],nm=m.name,cur=ent.e.y26[nm].ytd,prev=ent.e.y25[nm].ytd,p=t4pct(cur,prev);
+      if(t4Mode==='gap'){var od=officeDelta[nm];
+        if(p==='N/M'||p==null||od==='N/M'||od==null){tds+='<td class="dcell"><span class="big num nm">N/M</span></td>';}
+        else{var gap=p-od,beat=gap>=0;
+          tds+='<td class="dcell"><span class="big num '+(beat?'beat':'trail')+'">'+(beat?'&#9650;':'&#9660;')+' '+Math.abs(gap).toFixed(1)+' pts</span>'
+            +'<div class="sub num">prov '+t4ar(p)+Math.abs(p).toFixed(1)+'% &bull; off '+(od>=0?'&#9650;':'&#9660;')+Math.abs(od).toFixed(1)+'%</div></td>';}
+      }else{tds+='<td class="dcell"><span class="big num">'+t4f(cur,m.fmt)+'</span><div class="sub num">'+t4pctSpan(p)+'</div></td>';}
+    }
+    var hp=t4pct(ent.e.y26[T4_HEAD].ytd,ent.e.y25[T4_HEAD].ytd),offHp=officeDelta[T4_HEAD],flag='';
+    if(hp!=='N/M'&&hp!=null&&offHp!=='N/M'&&offHp!=null){var ng=hp-offHp;
+      if(Math.abs(ng)>=T4_THRESH){var bt=ng>=0;flag='<span class="flag '+(bt?'beat':'trail')+'">'+(bt?'&#9650; lift':'&#9660; drag')+'</span>';}}
+    var isOpen=!!t4OpenSet[ent.name],dn=t4esc(ent.name);
+    body+='<tr class="prov'+(isOpen?' open':'')+'" data-name="'+dn+'" tabindex="0" role="button" aria-expanded="'+(isOpen?'true':'false')+'">'
+      +'<td class="name"><span class="tw">'+(isOpen?'&#9662;':'&#9656;')+'</span><span class="pn">'+ent.name+flag+'</span>'
+      +(ent.role?'<span class="role">'+ent.role+'</span>':'')+'</td>'+tds+'</tr>';
+    body+='<tr class="drill'+(isOpen?'':' hide')+'" data-drill="'+dn+'"><td colspan="'+(T4_METRICS.length+1)+'"><div class="inner">'
+      +'<div class="dh">'+ent.name+(ent.role?' &middot; '+ent.role:'')+' — monthly detail (read against the pinned office totals above)</div>'
+      +t4GridHTML(ent.e,officeDelta,true)+'</div></td></tr>';
+  }
+  return '<div class="roster"><table class="rost"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+function t4LegendHTML(){
+  return '<div class="legend">'
+    +'<span><b>&Delta;</b> = 2026 vs 2025 &middot; <span class="t4up">&#9650; up</span> &middot; <span class="t4down">&#9660; down</span> (raw direction)</span>'
+    +'<span><b>vs office</b> <span class="beat">&#9650; teal = beating the office</span> &middot; <span class="trail">&#9660; amber = trailing it</span></span>'
+    +'<span><b>Lift/drag</b> flagged when '+T4_HEAD+' diverges &ge;'+T4_THRESH+' pts from the office</span></div>';
 }
 
 function t4OfficeOptions(){
-  var state=document.getElementById('t4State').value;
-  var sel=document.getElementById('t4Office');
-  var html='<option value="all">All Offices</option>';
-  for(var i=0;i<DS.length;i++){
-    var o=DS[i];
-    if(state&&o.state!==state)continue;
-    var nm=o.office.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-    html+='<option value="'+nm+'">'+o.office.replace(/&/g,'&amp;')+'</option>';
-  }
-  sel.innerHTML=html;
-  sel.value='all';
+  var state=document.getElementById('t4State').value,sel=document.getElementById('t4Office');
+  var html='<option value="all">All Offices</option>',first=null;
+  for(var i=0;i<DS.length;i++){var o=DS[i];if(state&&o.state!==state)continue;
+    if(first===null)first=o.office;
+    html+='<option value="'+t4esc(o.office)+'">'+o.office.replace(/&/g,'&amp;')+'</option>';}
+  sel.innerHTML=html; sel.value=first!==null?first:'all';   // default to the active state's first office
 }
 
 function t4ProviderOptions(){
-  var officeName=document.getElementById('t4Office').value;
-  var sel=document.getElementById('t4Provider');
+  var officeName=document.getElementById('t4Office').value,sel=document.getElementById('t4Provider');
   var html='<option value="all">All Providers</option>';
-  if(officeName==='all'){
-    sel.innerHTML=html;sel.value='all';sel.disabled=true;return;
-  }
-  sel.disabled=false;
-  var o=DS_MAP[officeName];
-  if(o){
-    for(var i=0;i<o.providers.length;i++){
-      var pn=o.providers[i].name.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-      html+='<option value="'+pn+'">'+o.providers[i].name.replace(/&/g,'&amp;')+'</option>';
-    }
-  }
-  sel.innerHTML=html;sel.value='all';
+  if(officeName==='all'){sel.innerHTML=html;sel.value='all';sel.disabled=true;return;}
+  sel.disabled=false; var o=DS_MAP[officeName];
+  if(o)for(var i=0;i<o.providers.length;i++)html+='<option value="'+t4esc(o.providers[i].name)+'">'+o.providers[i].name.replace(/&/g,'&amp;')+'</option>';
+  sel.innerHTML=html; sel.value='all';
 }
 
 function renderT4(){
   var state=document.getElementById('t4State').value;
   var officeName=document.getElementById('t4Office').value;
-  var providerName=document.getElementById('t4Provider').value;
-  var html='';
-
-  if(officeName==='all'){
-    // All offices (optionally filtered by state) — office-level blocks only.
-    var n=0;
-    for(var i=0;i<DS.length;i++){
-      var o=DS[i];
-      if(state&&o.state!==state)continue;
-      html+=t4Block(o.office,o.state,o.metrics,false);
-      n++;
-    }
-    html='<div class="ds-sub">Showing <strong>'+n+'</strong> office'+(n===1?'':'s')
-      +(state?' in '+state:'')+' &mdash; office-level totals. Select a single office to see its provider breakdown.</div>'+html;
-  } else {
-    var o=DS_MAP[officeName];
-    if(!o){document.getElementById('t4Wrap').innerHTML='<div class="empty-state"><p>No data for this office.</p></div>';return;}
-    if(providerName!=='all'){
-      // Single provider — that provider's data only.
-      var prov=null;
-      for(var i=0;i<o.providers.length;i++){if(o.providers[i].name===providerName){prov=o.providers[i];break;}}
-      if(prov){
-        html='<div class="ds-sub"><strong>'+o.office+'</strong> &mdash; '+o.state+' &bull; provider: <strong>'+prov.name+'</strong></div>';
-        html+=t4Block(prov.name,o.state,prov.metrics,true);
-      } else {
-        html='<div class="empty-state"><p>Provider not found.</p></div>';
-      }
-    } else {
-      // Single office — office block plus every named-provider block.
-      html='<div class="ds-sub"><strong>'+o.office+'</strong> &mdash; '+o.state
-        +' &bull; office total + <strong>'+o.providers.length+'</strong> named provider'+(o.providers.length===1?'':'s')+'</div>';
-      html+=t4Block(o.office,o.state,o.metrics,false);
-      for(var i=0;i<o.providers.length;i++){
-        html+=t4Block(o.providers[i].name,o.state,o.providers[i].metrics,true);
-      }
-    }
+  var wrap=document.getElementById('t4Wrap');
+  if(!officeName||officeName==='all'){
+    wrap.innerHTML='<div class="t4-prompt"><div class="ic">&#127970;</div><p>Select an office'
+      +(state?(' in <strong>'+state+'</strong>'):'')+' to see its perspective strip, provider roster, and monthly detail.</p></div>';
+    return;
   }
-  document.getElementById('t4Wrap').innerHTML=html;
+  var o=DS_MAP[officeName];
+  if(!o){wrap.innerHTML='<div class="t4-prompt"><p>No data for this office.</p></div>';return;}
+  var off=t4Entity(o.metrics),officeDelta={};
+  for(var i=0;i<T4_METRICS.length;i++){var nm=T4_METRICS[i].name;officeDelta[nm]=t4pct(off.y26[nm].ytd,off.y25[nm].ytd);}
+  var provs=o.providers.map(function(p){return {name:p.name,role:p.role||'',e:t4Entity(p.metrics)};});
+  var html=t4AnchorHTML(o,off);
+  if(provs.length){
+    // Full roster stays visible regardless of the provider filter — a selected
+    // provider is auto-expanded and scrolled into view, never isolated.
+    html+=t4MoversHTML(provs,officeDelta)+t4RosterBarHTML()+t4RosterHTML(provs,officeDelta);
+  }else{html+='<div class="t4-prompt"><p>No named providers qualify for this office.</p></div>';}
+  html+=t4LegendHTML();
+  wrap.innerHTML=html;
+  t4Bind();
+  if(t4ScrollTo){
+    var rows=document.querySelectorAll('#tab4 tr.prov');
+    for(var z=0;z<rows.length;z++){if(rows[z].getAttribute('data-name')===t4ScrollTo){rows[z].scrollIntoView({behavior:'smooth',block:'center'});break;}}
+    t4ScrollTo=null;
+  }
+}
+function t4Bind(){
+  var tg=document.getElementById('t4OfficeToggle');
+  if(tg)tg.addEventListener('click',function(){t4OfficeOpen=!t4OfficeOpen;renderT4();});
+  var ms=document.getElementById('t4ModeSeg');
+  if(ms)ms.querySelectorAll('button').forEach(function(b){b.addEventListener('click',function(){t4Mode=b.getAttribute('data-mode');renderT4();});});
+  var ds=document.getElementById('t4DetailSeg');
+  if(ds)ds.querySelectorAll('button').forEach(function(b){b.addEventListener('click',function(){t4Detail=b.getAttribute('data-detail');renderT4();});});
+  document.querySelectorAll('#tab4 table.rost thead th').forEach(function(th){
+    function s(){var k=th.getAttribute('data-k');if(t4SortKey===k){t4SortDir*=-1;}else{t4SortKey=k;t4SortDir=k==='name'?1:-1;}renderT4();}
+    th.addEventListener('click',s);
+    th.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();s();}});
+  });
+  document.querySelectorAll('#tab4 tr.prov').forEach(function(tr){
+    function t(){var nm=tr.getAttribute('data-name');if(t4OpenSet[nm])delete t4OpenSet[nm];else t4OpenSet[nm]=true;renderT4();}
+    tr.addEventListener('click',t);
+    tr.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();t();}});
+  });
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -1262,9 +1466,9 @@ document.getElementById('t1Search').addEventListener('input',renderT1);
 ['t2OfficeSel','t2Sort','t2Metric','t2Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT2);});
 ['t3Show','t3Metric','t3State','t3Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
 document.getElementById('t3Search').addEventListener('input',renderT3);
-document.getElementById('t4State').addEventListener('change',function(){t4OfficeOptions();t4ProviderOptions();renderT4();});
-document.getElementById('t4Office').addEventListener('change',function(){t4ProviderOptions();renderT4();});
-document.getElementById('t4Provider').addEventListener('change',renderT4);
+document.getElementById('t4State').addEventListener('change',function(){t4Reset();t4OfficeOptions();t4ProviderOptions();renderT4();});
+document.getElementById('t4Office').addEventListener('change',function(){t4Reset();t4ProviderOptions();renderT4();});
+document.getElementById('t4Provider').addEventListener('change',function(){var pv=document.getElementById('t4Provider').value;if(pv&&pv!=='all'){t4OpenSet[pv]=true;t4ScrollTo=pv;}renderT4();});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderT1();
