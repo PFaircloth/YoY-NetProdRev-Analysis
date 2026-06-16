@@ -248,7 +248,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 <div class="nav-tabs">
   <button class="nav-tab on" id="navTab1" onclick="switchTab(1)">&#127970; Office Analysis</button>
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
-  <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Provider Rank View</button>
+  <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Doctor Rank View</button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -375,18 +375,23 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 </div>
 
 <!-- ═══════════════════════════════════════════════════
-     TAB 3 — PROVIDER RANK VIEW (cross-office)
+     TAB 3 — DOCTOR RANK VIEW (cross-office)
 ════════════════════════════════════════════════════ -->
 <div id="tab3" style="display:none">
   <div class="scope-bar" id="t3ScopeBar"></div>
   <div class="kpis k4">
-    <div class="kpi"><div class="kpi-lbl">Total named providers shown</div><div class="kpi-val" id="t3KpiProvs">&mdash;</div></div>
+    <div class="kpi"><div class="kpi-lbl" id="t3KpiProvsLbl">Doctors shown</div><div class="kpi-val" id="t3KpiProvs">&mdash;</div></div>
     <div class="kpi"><div class="kpi-lbl" id="t3Lbl25">DSO Rev/Day &mdash; 2025</div><div class="kpi-val" id="t3Kpi25">&mdash;</div></div>
     <div class="kpi"><div class="kpi-lbl" id="t3Lbl26">DSO Rev/Day &mdash; 2026</div><div class="kpi-val" id="t3Kpi26">&mdash;</div></div>
     <div class="kpi"><div class="kpi-lbl">&Delta; Rev/Day</div><div class="kpi-val" id="t3KpiDelta">&mdash;</div></div>
   </div>
   <div class="card">
     <div class="ctrl-row">
+      <label>Provider type:</label>
+      <select id="t3PType">
+        <option value="doctors" selected>Doctors Only</option>
+        <option value="all">All Provider Types</option>
+      </select>
       <label>Show:</label>
       <select id="t3Show">
         <option value="25">Top 25</option>
@@ -865,18 +870,22 @@ function togT2Prov(pkey,prov){
 }
 
 // ── TAB 3 — PROVIDER RANK VIEW ────────────────────────────────────────────────
+// Doctor-type universe: General Dentist + dental specialists (excludes Hygienist and Other)
+var DOCTOR_TYPES={'General Dentist':1,'Prosthodontist':1,'Oral Surgeon':1,'Periodontist':1,'Orthodontist':1,'Pedodontist':1,'Endodontist':1};
 function getT3Data(){
   var show=document.getElementById('t3Show').value;
   var state=document.getElementById('t3State').value;
   var search=document.getElementById('t3Search').value.toLowerCase();
+  var ptype=document.getElementById('t3PType').value;
   var data=PR_ALL.slice();
+  if(ptype==='doctors')data=data.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];});
   if(state)data=data.filter(function(r){return r.state===state;});
   if(search)data=data.filter(function(r){
     return r.provider.toLowerCase().indexOf(search)>=0||r.office.toLowerCase().indexOf(search)>=0;
   });
   data.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
   if(show!=='all'){data=data.slice(0,parseInt(show));}
-  return {data:data,show:show,state:state,search:search};
+  return {data:data,show:show,state:state,search:search,ptype:ptype};
 }
 
 function renderT3(){
@@ -889,6 +898,7 @@ function renderT3(){
   var np25=0,np26=0;
   data.forEach(function(r){var cp=r.checkpoints[4];np25+=(cp.np2025||0);np26+=(cp.np2026||0);});
   var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25;
+  document.getElementById('t3KpiProvsLbl').innerHTML=(res.ptype==='doctors')?'Doctors shown':'Providers shown';
   sk('t3KpiProvs',data.length.toLocaleString(),false);
   sk('t3Kpi25',fk(rpd25),false);
   sk('t3Kpi26',fk(rpd26),rpd26<rpd25);
@@ -1012,7 +1022,7 @@ function switchTab(n){
 ['t1Show','t1Metric','t1State'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT1);});
 document.getElementById('t1Search').addEventListener('input',renderT1);
 ['t2OfficeSel','t2Sort','t2Metric'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT2);});
-['t3Show','t3Metric','t3State'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
+['t3PType','t3Show','t3Metric','t3State'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
 document.getElementById('t3Search').addEventListener('input',renderT3);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
