@@ -640,7 +640,8 @@ function getT1Data(){
   if(state)data=data.filter(function(r){return r.state===state;});
   if(search)data=data.filter(function(r){return r.office.toLowerCase().indexOf(search)>=0;});
   if(dir!=='all')data=data.filter(function(r){return dirPass(r.checkpoints,dir);});
-  data.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
+  // Growing → best improvement first (descending); Declining/All → worst decline first (ascending)
+  data.sort(function(a,b){return dir==='grow'?(b.sortDelta||0)-(a.sortDelta||0):(a.sortDelta||0)-(b.sortDelta||0);});
   if(show==='25')data=data.slice(0,25);
   else if(show==='15')data=data.slice(0,15);
   else if(show==='best')data=data.slice().reverse().slice(0,15);
@@ -813,7 +814,7 @@ function renderT2(){
     return;
   }
 
-  if(sort==='delta')provs.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
+  if(sort==='delta')provs.sort(function(a,b){return dir==='grow'?(b.sortDelta||0)-(a.sortDelta||0):(a.sortDelta||0)-(b.sortDelta||0);});
   else if(sort==='best')provs.sort(function(a,b){return (b.sortDelta||0)-(a.sortDelta||0);});
   else if(sort==='np25')provs.sort(function(a,b){return (b.checkpoints[4].np2025||0)-(a.checkpoints[4].np2025||0);});
   else if(sort==='np26')provs.sort(function(a,b){return (b.checkpoints[4].np2026||0)-(a.checkpoints[4].np2026||0);});
@@ -934,7 +935,8 @@ function getT3Data(){
   if(search)data=data.filter(function(r){
     return r.provider.toLowerCase().indexOf(search)>=0||r.office.toLowerCase().indexOf(search)>=0;
   });
-  data.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
+  // Growing → best improvement first (descending); Declining/All → worst decline first (ascending)
+  data.sort(function(a,b){return dir==='grow'?(b.sortDelta||0)-(a.sortDelta||0):(a.sortDelta||0)-(b.sortDelta||0);});
   if(show!=='all'){data=data.slice(0,parseInt(show));}
   return {data:data,show:show,state:state,search:search,dir:dir};
 }
