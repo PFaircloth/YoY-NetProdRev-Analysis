@@ -248,6 +248,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 <div class="nav-tabs">
   <button class="nav-tab on" id="navTab1" onclick="switchTab(1)">&#127970; Office Analysis</button>
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
+  <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Provider Rank View</button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -373,6 +374,74 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════
+     TAB 3 — PROVIDER RANK VIEW (cross-office)
+════════════════════════════════════════════════════ -->
+<div id="tab3" style="display:none">
+  <div class="scope-bar" id="t3ScopeBar"></div>
+  <div class="kpis k4">
+    <div class="kpi"><div class="kpi-lbl">Total named providers shown</div><div class="kpi-val" id="t3KpiProvs">&mdash;</div></div>
+    <div class="kpi"><div class="kpi-lbl" id="t3Lbl25">DSO Rev/Day &mdash; 2025</div><div class="kpi-val" id="t3Kpi25">&mdash;</div></div>
+    <div class="kpi"><div class="kpi-lbl" id="t3Lbl26">DSO Rev/Day &mdash; 2026</div><div class="kpi-val" id="t3Kpi26">&mdash;</div></div>
+    <div class="kpi"><div class="kpi-lbl">&Delta; Rev/Day</div><div class="kpi-val" id="t3KpiDelta">&mdash;</div></div>
+  </div>
+  <div class="card">
+    <div class="ctrl-row">
+      <label>Show:</label>
+      <select id="t3Show">
+        <option value="25">Top 25</option>
+        <option value="50">Top 50</option>
+        <option value="100">Top 100</option>
+        <option value="150">Top 150</option>
+        <option value="all" selected>All 359 providers</option>
+      </select>
+      <label>Metric:</label>
+      <select id="t3Metric">
+        <option value="delta">&#916; Rev/Day ($)</option>
+        <option value="pct">% change</option>
+      </select>
+      <label>State:</label>
+      <select id="t3State">
+        <option value="">All states</option>
+        <option>Alabama</option>
+        <option>Arkansas</option>
+        <option>Florida</option>
+        <option>Kentucky</option>
+        <option>Tennessee</option>
+      </select>
+      <label>Search:</label>
+      <input type="text" id="t3Search" placeholder="provider or office...">
+    </div>
+    <div class="trend-legend">
+      <div class="trend-legend-row">
+        <span class="tl-lbl">Heat map:</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#7f0000"></span>&minus;$4,000+</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#C0392B"></span>&minus;$2,500 to &minus;$4,000</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#e88080"></span>&minus;$1,000 to &minus;$2,500</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#fdecea"></span>&minus;$300 to &minus;$1,000</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#f5b8b8;border:0.5px solid #e88080"></span>0 to &minus;$300</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#a8dbb8;border:0.5px solid #82c4a0"></span>0 to +$500</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#82c4a0"></span>+$500 to +$2,000</span>
+        <span class="tl-item"><span class="hm-swatch" style="background:#0f5032"></span>+$2,000+</span>
+      </div>
+      <div class="trend-legend-row">
+        <span class="tl-lbl">Provider type:</span>
+        <span class="tl-item"><span class="badge badge-gd">General Dentist</span></span>
+        <span class="tl-item"><span class="badge badge-hyg">Hygienist</span></span>
+        <span class="tl-item"><span class="badge badge-spec">Specialist</span></span>
+        <span class="tl-item"><span class="badge badge-new">NEW</span></span>
+        <span class="tl-div"></span>
+        <span class="tl-lbl">YTD May trend:</span>
+        <span class="tl-item"><span class="trend-up">&#8593;</span> Improving</span>
+        <span class="tl-item"><span class="trend-dn">&#8595;</span> Worsening</span>
+        <span class="tl-item"><span class="trend-fl">&#8594;</span> Stable</span>
+      </div>
+    </div>
+    <div class="hint">All named providers across 76 offices &mdash; sorted by worst YoY decline &bull; click any provider row to expand the lever breakdown across all YTD checkpoints</div>
+    <div id="t3Wrap"></div>
+  </div>
+</div>
+
 <div class="footer">Generated from source data &mdash; Jan&ndash;May 2025 vs 2026 &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
 </div>
 
@@ -386,8 +455,27 @@ var PD=__PD_DATA__;
 var PD_MAP={};
 for(var i=0;i<PD.length;i++){PD_MAP[PD[i].office]=PD[i];}
 
+// Flatten PD into a single cross-office list of named providers (Tab 3)
+var PR_ALL=[];
+for(var i=0;i<PD.length;i++){
+  var od=PD[i];
+  for(var j=0;j<od.providers.length;j++){
+    var p=od.providers[j];
+    PR_ALL.push({
+      provider:    p.provider,
+      office:      od.office,
+      state:       od.state||'&mdash;',
+      ptype:       p.ptype,
+      isNew:       p.isNew,
+      sortDelta:   p.sortDelta,
+      checkpoints: p.checkpoints
+    });
+  }
+}
+
 var t1OpenKey=null;
 var t2OpenProv=null;
+var t3OpenKey=null;
 var currentTab=1;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -776,22 +864,160 @@ function togT2Prov(pkey,prov){
   }
 }
 
+// ── TAB 3 — PROVIDER RANK VIEW ────────────────────────────────────────────────
+function getT3Data(){
+  var show=document.getElementById('t3Show').value;
+  var state=document.getElementById('t3State').value;
+  var search=document.getElementById('t3Search').value.toLowerCase();
+  var data=PR_ALL.slice();
+  if(state)data=data.filter(function(r){return r.state===state;});
+  if(search)data=data.filter(function(r){
+    return r.provider.toLowerCase().indexOf(search)>=0||r.office.toLowerCase().indexOf(search)>=0;
+  });
+  data.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
+  if(show!=='all'){data=data.slice(0,parseInt(show));}
+  return {data:data,show:show,state:state,search:search};
+}
+
+function renderT3(){
+  t3OpenKey=null;
+  var metric=document.getElementById('t3Metric').value;
+  var res=getT3Data();
+  var data=res.data;
+
+  // KPI ribbon — DSO Rev/Day across visible providers
+  var np25=0,np26=0;
+  data.forEach(function(r){var cp=r.checkpoints[4];np25+=(cp.np2025||0);np26+=(cp.np2026||0);});
+  var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25;
+  sk('t3KpiProvs',data.length.toLocaleString(),false);
+  sk('t3Kpi25',fk(rpd25),false);
+  sk('t3Kpi26',fk(rpd26),rpd26<rpd25);
+  sk('t3KpiDelta',fk(dRD),dRD<0);
+  var scope=res.state?(' &mdash; '+res.state+(res.search?' | "'+res.search+'"':'')):(res.search?' &mdash; "'+res.search+'"':'');
+  document.getElementById('t3Lbl25').innerHTML='DSO Rev/Day 2025'+scope;
+  document.getElementById('t3Lbl26').innerHTML='DSO Rev/Day 2026'+scope;
+
+  var isFiltered=(res.show!=='all')||res.state||res.search;
+  var bar=document.getElementById('t3ScopeBar');
+  if(isFiltered){
+    var showLabels={25:'Top 25',50:'Top 50',100:'Top 100',150:'Top 150',all:'All providers'};
+    var parts=[showLabels[res.show]||res.show];
+    if(res.state)parts.push(res.state);
+    if(res.search)parts.push('"'+res.search+'"');
+    bar.style.display='block';
+    bar.innerHTML='Showing: <strong>'+parts.join(' &bull; ')+'</strong> &nbsp;&bull;&nbsp; '+data.length+' providers';
+  } else {bar.style.display='none';}
+
+  var thead='<thead><tr>'
+    +'<th class="rk">#</th>'
+    +'<th class="l" style="width:26%">Provider</th>'
+    +'<th class="l" style="width:18%">Office</th>'
+    +'<th class="l" style="width:8%">State</th>'
+    +'<th>YTD Jan</th><th>YTD Feb</th><th>YTD Mar</th><th>YTD Apr</th><th>YTD May</th>'
+    +'</tr></thead>';
+
+  var rows='';
+  for(var i=0;i<data.length;i++){
+    var r=data[i];
+    var cells='';
+    for(var j=0;j<r.checkpoints.length;j++){
+      var v=metric==='delta'?r.checkpoints[j].dRD:r.checkpoints[j].pctRD;
+      var extra='';
+      if(j===4&&metric==='delta'){extra=trendArrow(r.checkpoints);}
+      cells+='<td style="'+hcol(v,metric)+'">'+fm(v,metric)+extra+'</td>';
+    }
+    var badges='';
+    if(r.ptype){
+      var bc=r.ptype==='General Dentist'?'badge-gd':(r.ptype==='Hygienist'?'badge-hyg':(r.ptype==='Other'?'badge-other':'badge-spec'));
+      badges+='<span class="badge '+bc+'">'+r.ptype+'</span>';
+    }
+    if(r.isNew)badges+='<span class="badge badge-new">NEW</span>';
+    var key='t3_'+i;
+    rows+='<tr class="dr" data-key="'+key+'" data-idx="'+i+'">'
+      +'<td class="rk">'+(i+1)+'</td>'
+      +'<td class="l">'+r.provider+badges+' <span class="arrow" id="a'+key+'">&#8250;</span></td>'
+      +'<td class="st">'+r.office+'</td>'
+      +'<td class="st">'+r.state+'</td>'+cells
+      +'</tr>'
+      +'<tr class="prov-drill-wrap" id="d'+key+'" style="display:none"><td colspan="9"><div id="dc'+key+'"></div></td></tr>';
+  }
+
+  if(!data.length){
+    document.getElementById('t3Wrap').innerHTML='<div class="empty-state"><div class="icon">&#128269;</div><p>No providers match the current filters</p></div>';
+    return;
+  }
+  document.getElementById('t3Wrap').innerHTML='<table class="hm">'+thead+'<tbody>'+rows+'</tbody></table>';
+
+  var trs=document.getElementById('t3Wrap').querySelectorAll('tr.dr');
+  var cdata=data;
+  for(var k=0;k<trs.length;k++){
+    (function(tr,d){
+      tr.addEventListener('click',function(){
+        var key=tr.getAttribute('data-key');
+        var idx=parseInt(tr.getAttribute('data-idx'));
+        togT3(key,d[idx]);
+      });
+    })(trs[k],cdata);
+  }
+}
+
+function togT3(key,r){
+  var drill=document.getElementById('d'+key);
+  var arr=document.getElementById('a'+key);
+  if(!drill||!arr)return;
+  var isOpen=drill.style.display!=='none';
+  if(t3OpenKey&&t3OpenKey!==key){
+    var od=document.getElementById('d'+t3OpenKey);
+    var oa=document.getElementById('a'+t3OpenKey);
+    if(od)od.style.display='none';
+    if(oa)oa.classList.remove('open');
+  }
+  if(isOpen){drill.style.display='none';arr.classList.remove('open');t3OpenKey=null;}
+  else{
+    var cards='';
+    for(var i=0;i<r.checkpoints.length;i++)cards+=buildCpCard(r.checkpoints[i],i,'#5B4A9C');
+    var badges='';
+    if(r.ptype){
+      var bc=r.ptype==='General Dentist'?'badge-gd':(r.ptype==='Hygienist'?'badge-hyg':(r.ptype==='Other'?'badge-other':'badge-spec'));
+      badges+='<span class="badge '+bc+'">'+r.ptype+'</span>';
+    }
+    if(r.isNew)badges+='<span class="badge badge-new">NEW</span>';
+    var html='<div class="prov-drill-inner">'
+      +'<div class="prov-drill-title">'+r.provider+badges+' <span style="color:#888;font-weight:400">&mdash; '+r.office+(r.state&&r.state!=='&mdash;'?' ('+r.state+')':'')+'</span></div>'
+      +'<div class="leg-row">'
+      +'<span class="leg-item"><span class="leg-sq" style="background:#C0392B"></span>$/Visit lever</span>'
+      +'<span class="leg-item"><span class="leg-sq" style="background:#7B68EE"></span>Visits/Dr Day lever</span>'
+      +'<span class="leg-item"><span class="leg-sq" style="background:#D2691E"></span>Dr Days/Day lever</span>'
+      +'</div>'
+      +'<div class="drill-grid">'+cards+'</div>'
+      +'</div>';
+    document.getElementById('dc'+key).innerHTML=html;
+    drill.style.display='';arr.classList.add('open');t3OpenKey=key;
+    drill.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(n){
   currentTab=n;
   document.getElementById('tab1').style.display=n===1?'':'none';
   document.getElementById('tab2').style.display=n===2?'':'none';
+  document.getElementById('tab3').style.display=n===3?'':'none';
   document.getElementById('navTab1').className='nav-tab'+(n===1?' on':'');
   document.getElementById('navTab2').className='nav-tab'+(n===2?' on':'');
+  document.getElementById('navTab3').className='nav-tab'+(n===3?' on':'');
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
 ['t1Show','t1Metric','t1State'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT1);});
 document.getElementById('t1Search').addEventListener('input',renderT1);
 ['t2OfficeSel','t2Sort','t2Metric'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT2);});
+['t3Show','t3Metric','t3State'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
+document.getElementById('t3Search').addEventListener('input',renderT3);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderT1();
+renderT3();
 </script>
 </body>
 </html>
