@@ -278,6 +278,12 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
         <option value="delta">&#916; Rev/Day ($)</option>
         <option value="pct">% change</option>
       </select>
+      <label>Direction:</label>
+      <select id="t1Dir">
+        <option value="all" selected>All</option>
+        <option value="decl">Declining &mdash; &Delta; Rev/Day &lt; 0</option>
+        <option value="grow">Growing &mdash; &Delta; Rev/Day &gt; 0</option>
+      </select>
       <label>State:</label>
       <select id="t1State">
         <option value="">All states</option>
@@ -344,6 +350,12 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
         <option value="delta">&#916; Rev/Day ($)</option>
         <option value="pct">% change</option>
       </select>
+      <label>Direction:</label>
+      <select id="t2Dir">
+        <option value="all" selected>All</option>
+        <option value="decl">Declining &mdash; &Delta; Rev/Day &lt; 0</option>
+        <option value="grow">Growing &mdash; &Delta; Rev/Day &gt; 0</option>
+      </select>
     </div>
     <div class="trend-legend">
       <div class="trend-legend-row">
@@ -405,6 +417,12 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
       <select id="t3Metric">
         <option value="delta">&#916; Rev/Day ($)</option>
         <option value="pct">% change</option>
+      </select>
+      <label>Direction:</label>
+      <select id="t3Dir">
+        <option value="all" selected>All</option>
+        <option value="decl">Declining &mdash; &Delta; Rev/Day &lt; 0</option>
+        <option value="grow">Growing &mdash; &Delta; Rev/Day &gt; 0</option>
       </select>
       <label>State:</label>
       <select id="t3State">
@@ -501,6 +519,15 @@ function trendArrow(checkpoints){
   if(pct<5)return '<span class="trend-fl" title="Stable within 5% — '+tip+'">&#8594;</span>';
   if(diff>0)return '<span class="trend-up" title="Improving — '+tip+'">&#8593;</span>';
   return '<span class="trend-dn" title="Worsening — '+tip+'">&#8595;</span>';
+}
+
+// Direction filter — uses YTD May (checkpoint index 4) Δ Rev/Day. Rows with a
+// null/zero Δ are excluded from both Declining and Growing.
+function dirPass(checkpoints,dir){
+  if(dir==='all'||!dir)return true;
+  var d=checkpoints&&checkpoints[4]?checkpoints[4].dRD:null;
+  if(d==null)return false;
+  return dir==='decl'?d<0:d>0;
 }
 
 function hcol(v,metric){
@@ -613,15 +640,17 @@ function getT1Data(){
   var show=document.getElementById('t1Show').value;
   var state=document.getElementById('t1State').value;
   var search=document.getElementById('t1Search').value.toLowerCase();
+  var dir=document.getElementById('t1Dir').value;
   var data=D.slice();
   if(state)data=data.filter(function(r){return r.state===state;});
   if(search)data=data.filter(function(r){return r.office.toLowerCase().indexOf(search)>=0;});
+  if(dir!=='all')data=data.filter(function(r){return dirPass(r.checkpoints,dir);});
   data.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
   if(show==='25')data=data.slice(0,25);
   else if(show==='15')data=data.slice(0,15);
   else if(show==='best')data=data.slice().reverse().slice(0,15);
-  var showOther=(show==='all')&&!state&&!search;
-  return {data:data,showOther:showOther,show:show,state:state,search:search};
+  var showOther=(show==='all')&&!state&&!search&&dir==='all';
+  return {data:data,showOther:showOther,show:show,state:state,search:search,dir:dir};
 }
 
 function renderT1(){
@@ -644,11 +673,13 @@ function renderT1(){
   document.getElementById('t1Lbl25').innerHTML='Rev/Day 2025'+scope;
   document.getElementById('t1Lbl26').innerHTML='Rev/Day 2026'+scope;
 
-  var isFiltered=(res.show!=='all')||res.state||res.search;
+  var isFiltered=(res.show!=='all')||res.state||res.search||res.dir!=='all';
   var bar=document.getElementById('t1ScopeBar');
   if(isFiltered){
     var showLabels={all:'All 76',25:'Top 25 declining',15:'Top 15 declining',best:'Top 15 improving'};
+    var dirLabels={decl:'Declining',grow:'Growing'};
     var parts=[showLabels[res.show]||res.show];
+    if(res.dir!=='all')parts.push(dirLabels[res.dir]||res.dir);
     if(res.state)parts.push(res.state);
     if(res.search)parts.push('"'+res.search+'"');
     bar.style.display='block';
@@ -738,6 +769,7 @@ function renderT2(){
   var officeName=document.getElementById('t2OfficeSel').value;
   var sort=document.getElementById('t2Sort').value;
   var metric=document.getElementById('t2Metric').value;
+  var dir=document.getElementById('t2Dir').value;
 
   if(!officeName){
     document.getElementById('t2Wrap').innerHTML='<div class="empty-state"><div class="icon">&#128101;</div><p>Select an office from the dropdown above to see provider performance</p></div>';
@@ -755,18 +787,37 @@ function renderT2(){
     return;
   }
 
+  var provs=offData.providers.slice();
+  if(dir!=='all')provs=provs.filter(function(p){return dirPass(p.checkpoints,dir);});
+
   var offSummary=null;
   for(var i=0;i<D.length;i++){if(D[i].office===officeName){offSummary=D[i];break;}}
-  if(offSummary){
+  var dirLabels={decl:' (declining)',grow:' (growing)'};
+  if(dir==='all'&&offSummary){
+    // No direction filter — show office-summary totals (includes Other providers)
     var cp=offSummary.checkpoints[4];
     sk('t2KpiProvs',offData.providers.length+' named providers',false);
     sk('t2Kpi25',fd(cp.rpd2025),false);
     sk('t2Kpi26',fd(cp.rpd2026),(cp.rpd2026||0)<(cp.rpd2025||0));
     sk('t2KpiDelta',fd(cp.dRD),(cp.dRD||0)<0);
     document.getElementById('t2LblOff').innerHTML=officeName+' &mdash; '+offData.state;
+  } else {
+    // Direction filter active — recompute Rev/Day from the visible providers
+    var np25=0,np26=0;
+    provs.forEach(function(p){var c=p.checkpoints[4];np25+=(c.np2025||0);np26+=(c.np2026||0);});
+    var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25;
+    sk('t2KpiProvs',provs.length+' named providers',false);
+    sk('t2Kpi25',fd(rpd25),false);
+    sk('t2Kpi26',fd(rpd26),rpd26<rpd25);
+    sk('t2KpiDelta',fd(dRD),dRD<0);
+    document.getElementById('t2LblOff').innerHTML=officeName+' &mdash; '+offData.state+(dirLabels[dir]||'');
   }
 
-  var provs=offData.providers.slice();
+  if(!provs.length){
+    document.getElementById('t2Wrap').innerHTML='<div class="empty-state"><div class="icon">&#128269;</div><p>No '+(dir==='decl'?'declining':'growing')+' providers at this office</p></div>';
+    return;
+  }
+
   if(sort==='delta')provs.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
   else if(sort==='best')provs.sort(function(a,b){return (b.sortDelta||0)-(a.sortDelta||0);});
   else if(sort==='np25')provs.sort(function(a,b){return (b.checkpoints[4].np2025||0)-(a.checkpoints[4].np2025||0);});
@@ -809,7 +860,7 @@ function renderT2(){
   }
 
   var other=offData.otherProviders;
-  if(other&&other.count>0&&other.checkpoints.length>0){
+  if(dir==='all'&&other&&other.count>0&&other.checkpoints.length>0){
     var ocells='';
     for(var j=0;j<other.checkpoints.length;j++){
       var ov=metric==='delta'?other.checkpoints[j].dRD:other.checkpoints[j].pctRD;
@@ -881,15 +932,17 @@ function getT3Data(){
   var state=document.getElementById('t3State').value;
   var search=document.getElementById('t3Search').value.toLowerCase();
   var ptype=document.getElementById('t3PType').value;
+  var dir=document.getElementById('t3Dir').value;
   var data=PR_ALL.slice();
   if(ptype==='doctors')data=data.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];});
+  if(dir!=='all')data=data.filter(function(r){return dirPass(r.checkpoints,dir);});
   if(state)data=data.filter(function(r){return r.state===state;});
   if(search)data=data.filter(function(r){
     return r.provider.toLowerCase().indexOf(search)>=0||r.office.toLowerCase().indexOf(search)>=0;
   });
   data.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
   if(show!=='all'){data=data.slice(0,parseInt(show));}
-  return {data:data,show:show,state:state,search:search,ptype:ptype};
+  return {data:data,show:show,state:state,search:search,ptype:ptype,dir:dir};
 }
 
 function renderT3(){
@@ -912,11 +965,14 @@ function renderT3(){
   document.getElementById('t3Lbl25').innerHTML='DSO Rev/Day 2025'+scope;
   document.getElementById('t3Lbl26').innerHTML='DSO Rev/Day 2026'+scope;
 
-  var isFiltered=(res.show!=='all')||res.state||res.search;
+  var isFiltered=(res.show!=='all')||res.state||res.search||res.dir!=='all';
   var bar=document.getElementById('t3ScopeBar');
   if(isFiltered){
     var showLabels={25:'Top 25',50:'Top 50',100:'Top 100',150:'Top 150',all:'All providers'};
+    var dirLabels={decl:'Declining',grow:'Growing'};
     var parts=[showLabels[res.show]||res.show];
+    if(res.ptype==='doctors')parts.push('Doctors only');
+    if(res.dir!=='all')parts.push(dirLabels[res.dir]||res.dir);
     if(res.state)parts.push(res.state);
     if(res.search)parts.push('"'+res.search+'"');
     bar.style.display='block';
@@ -1024,10 +1080,10 @@ function switchTab(n){
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
-['t1Show','t1Metric','t1State'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT1);});
+['t1Show','t1Metric','t1State','t1Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT1);});
 document.getElementById('t1Search').addEventListener('input',renderT1);
-['t2OfficeSel','t2Sort','t2Metric'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT2);});
-['t3PType','t3Show','t3Metric','t3State'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
+['t2OfficeSel','t2Sort','t2Metric','t2Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT2);});
+['t3PType','t3Show','t3Metric','t3State','t3Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
 document.getElementById('t3Search').addEventListener('input',renderT3);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
