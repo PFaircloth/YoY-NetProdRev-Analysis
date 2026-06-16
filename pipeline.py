@@ -91,6 +91,17 @@ def _wd_cumulative(year, thru_month):
     return total
 
 
+def _yoy_pct(delta, baseline):
+    """YoY % change of Rev/Day. Returns the string 'N/M' (Not Meaningful) when
+    the 2025 baseline is negative, zero, or below the near-zero floor, where a
+    percentage would be absurd; None when inputs are missing."""
+    if delta is None or baseline is None:
+        return None
+    if baseline < config.NM_BASELINE_FLOOR:
+        return "N/M"
+    return delta / baseline * 100
+
+
 def _build_checkpoints(rows_y1, rows_y2, include_levers=True):
     checkpoints = []
     for m in config.MONTHS:
@@ -119,7 +130,7 @@ def _build_checkpoints(rows_y1, rows_y2, include_levers=True):
         ddd2 = dd2 / wd2  if wd2  else None
 
         drd      = (rd2 - rd1)     if rd1 is not None and rd2 is not None else None
-        drd_pct  = (drd / rd1 * 100) if (drd is not None and rd1 and rd1 != 0) else None
+        drd_pct  = _yoy_pct(drd, rd1)
         dspv     = (spv2 - spv1)   if spv1 is not None and spv2 is not None else None
         dvdd     = (vdd2 - vdd1)   if vdd1 is not None and vdd2 is not None else None
 

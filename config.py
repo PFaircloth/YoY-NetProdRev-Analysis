@@ -22,6 +22,11 @@ PARTIAL_MONTH = None
 PROVIDER_THRESHOLD_PCT = 90.0
 PROVIDER_FLOOR_PCT = 2.0
 
+# YoY % change is "Not Meaningful" (N/M) when the 2025 baseline Rev/Day is
+# negative, zero, or below this near-zero floor ($/day). Avoids absurd
+# percentages from tiny/negative denominators.
+NM_BASELINE_FLOOR = 50.0
+
 import os as _os
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
 

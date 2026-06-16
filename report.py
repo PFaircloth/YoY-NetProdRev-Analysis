@@ -202,6 +202,7 @@ td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
 .leg-item{display:flex;align-items:center;gap:3px;font-size:10px;color:#555}
 .leg-sq{width:9px;height:9px;border-radius:2px}
 .nc{color:#C0392B;font-weight:600}.pc{color:#1a7a4a;font-weight:600}
+.nm{color:#999!important;font-style:italic;font-weight:400!important}
 .other-sep{border-top:1.5px solid #ccc!important}
 .other-row td{color:#999;font-style:italic}
 /* Provider tab empty state */
@@ -504,6 +505,7 @@ function trendArrow(checkpoints){
 
 function hcol(v,metric){
   if(v==null)return 'background:#fafafa;color:#bbb';
+  if(v==='N/M')return 'background:#f4f4f4;color:#999;font-style:italic';
   if(metric==='delta'){
     if(v<=-4000)return 'background:#7f0000;color:#fff';
     if(v<=-2500)return 'background:#C0392B;color:#fff';
@@ -526,7 +528,7 @@ function hcol(v,metric){
   return 'background:#fafafa;color:#888';
 }
 function fd(v){if(v==null)return '&mdash;';return(v<0?'&minus;$':'$')+Math.abs(Math.round(v)).toLocaleString();}
-function fp(v){if(v==null)return '&mdash;';return(v<0?'':'+')+''+v.toFixed(1)+'%';}
+function fp(v){if(v==null)return '&mdash;';if(v==='N/M')return '<span class="nm" title="Not Meaningful — 2025 baseline is negative, zero, or near-zero">N/M</span>';return(v<0?'':'+')+''+v.toFixed(1)+'%';}
 function fn(v){if(v==null)return '&mdash;';return Math.round(v).toLocaleString();}
 function fm(v,metric){return metric==='pct'?fp(v):fd(v);}
 function fv(v){if(v==null)return '&mdash;';return v.toFixed(2);}
