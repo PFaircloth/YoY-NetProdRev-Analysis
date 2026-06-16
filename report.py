@@ -398,7 +398,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
         <option value="50">Top 50</option>
         <option value="100">Top 100</option>
         <option value="150">Top 150</option>
-        <option value="all" selected>All 359 providers</option>
+        <option value="all" id="t3ShowAll" selected>All 359 providers</option>
       </select>
       <label>Metric:</label>
       <select id="t3Metric">
@@ -872,6 +872,8 @@ function togT2Prov(pkey,prov){
 // ── TAB 3 — PROVIDER RANK VIEW ────────────────────────────────────────────────
 // Doctor-type universe: General Dentist + dental specialists (excludes Hygienist and Other)
 var DOCTOR_TYPES={'General Dentist':1,'Prosthodontist':1,'Oral Surgeon':1,'Periodontist':1,'Orthodontist':1,'Pedodontist':1,'Endodontist':1};
+var T3_DOCTOR_COUNT=PR_ALL.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];}).length;
+var T3_ALL_COUNT=PR_ALL.length;
 function getT3Data(){
   var show=document.getElementById('t3Show').value;
   var state=document.getElementById('t3State').value;
@@ -899,6 +901,7 @@ function renderT3(){
   data.forEach(function(r){var cp=r.checkpoints[4];np25+=(cp.np2025||0);np26+=(cp.np2026||0);});
   var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25;
   document.getElementById('t3KpiProvsLbl').innerHTML=(res.ptype==='doctors')?'Doctors shown':'Providers shown';
+  document.getElementById('t3ShowAll').textContent=(res.ptype==='doctors')?('All '+T3_DOCTOR_COUNT+' doctors'):('All '+T3_ALL_COUNT+' providers');
   sk('t3KpiProvs',data.length.toLocaleString(),false);
   sk('t3Kpi25',fk(rpd25),false);
   sk('t3Kpi26',fk(rpd26),rpd26<rpd25);
