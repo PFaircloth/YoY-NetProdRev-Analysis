@@ -85,6 +85,22 @@ def _transform_providers(provider_data):
     return PD
 
 
+def _transform_data_summary(ds_data):
+    """Pass-through for the Data Summary payload, normalizing the state label."""
+    out = []
+    for o in ds_data:
+        out.append({
+            "office":    o["office"],
+            "state":     o["state"] or "—",
+            "metrics":   o["metrics"],
+            "providers": [
+                {"name": p["name"], "metrics": p["metrics"]}
+                for p in o["providers"]
+            ],
+        })
+    return out
+
+
 def _t2_options(office_data):
     """Generate <option> elements for the Tab 2 office selector."""
     named = sorted(
@@ -101,13 +117,15 @@ def _t2_options(office_data):
 
 # ── HTML generation ───────────────────────────────────────────────────────────
 
-def generate_html(office_data, provider_data):
+def generate_html(office_data, provider_data, data_summary):
     D, OTHER = _transform_offices(office_data)
     PD       = _transform_providers(provider_data)
+    DS       = _transform_data_summary(data_summary)
 
     D_json     = json.dumps(D,     ensure_ascii=False, separators=(",", ":"))
     OTHER_json = json.dumps(OTHER, ensure_ascii=False, separators=(",", ":"))
     PD_json    = json.dumps(PD,    ensure_ascii=False, separators=(",", ":"))
+    DS_json    = json.dumps(DS,    ensure_ascii=False, separators=(",", ":"))
 
     t2_opts = _t2_options(office_data)
 
@@ -118,6 +136,7 @@ def generate_html(office_data, provider_data):
     html = html.replace("__D_DATA__",     D_json)
     html = html.replace("__OTHER_DATA__", OTHER_json)
     html = html.replace("__PD_DATA__",    PD_json)
+    html = html.replace("__DS_DATA__",    DS_json)
     html = html.replace("__T2_OPTIONS__", t2_opts)
     html = html.replace("__WD25__",       str(wd_y1))
     html = html.replace("__WD26__",       str(wd_y2))
@@ -226,6 +245,22 @@ td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
 .trend-legend .tl-item{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .trend-legend .tl-div{width:1px;height:16px;background:#ddd;margin:0 4px}
 .hm-swatch{display:inline-block;width:28px;height:12px;border-radius:2px;vertical-align:middle;margin-right:3px}
+/* Tab 4 — Data Summary ("show your work") */
+.ds-block{margin-bottom:18px;border:0.5px solid #ddd;border-radius:8px;overflow:hidden}
+table.ds{width:100%;border-collapse:collapse;table-layout:fixed}
+table.ds th{font-size:10px;background:#fafafa;color:#666;padding:6px 6px;border-bottom:1.5px solid #ddd;text-align:right;white-space:nowrap}
+table.ds th.l{text-align:left}
+table.ds td{font-size:11px;padding:5px 6px;text-align:right;border-bottom:0.5px solid #f0f0f0;white-space:nowrap}
+table.ds td.l{text-align:left}
+.ds-hdr td{padding:8px 12px;font-size:13px;font-weight:600;text-align:left;border:none}
+.ds-hdr.office td{background:#1F3864;color:#fff}
+.ds-hdr.provider td{background:#2E4D8A;color:#fff}
+.ds-hdr .ds-state{font-weight:400;opacity:.75;font-size:11px;margin-left:6px}
+.ds-y25 td{background:#eef3fb}
+.ds-y26 td{background:#fff}
+.ds-metric{font-weight:600;color:#1F3864}
+.ds-ytd{border-left:1.5px solid #d5dce8;font-weight:700}
+.ds-sub{font-size:11px;color:#888;font-weight:400;padding:6px 12px;background:#f6f8fc;border-bottom:0.5px solid #e5e9f2}
 /* Tab 2 provider table */
 table.pt{table-layout:fixed;font-size:11px}
 table.pt th{font-size:10px;background:#eef0ff;padding:5px}
@@ -250,6 +285,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   <button class="nav-tab on" id="navTab1" onclick="switchTab(1)">&#127970; Office Analysis</button>
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
   <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Doctor Rank View</button>
+  <button class="nav-tab" id="navTab4" onclick="switchTab(4)">&#128203; Data Summary</button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -461,6 +497,31 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════
+     TAB 4 — DATA SUMMARY (show your work)
+════════════════════════════════════════════════════ -->
+<div id="tab4" style="display:none">
+  <div class="card">
+    <div class="ctrl-row">
+      <label>State:</label>
+      <select id="t4State">
+        <option value="">All states</option>
+        <option>Alabama</option>
+        <option>Arkansas</option>
+        <option>Florida</option>
+        <option>Kentucky</option>
+        <option>Tennessee</option>
+      </select>
+      <label>Office:</label>
+      <select id="t4Office" class="big"></select>
+      <label>Provider:</label>
+      <select id="t4Provider"></select>
+    </div>
+    <div class="hint">Transparent view of the underlying source data driving every calculation &mdash; monthly values are individual-month actuals; YTD Total sums the months (ratio metrics recomputed from YTD totals). Currency rounded to whole dollars.</div>
+    <div id="t4Wrap"></div>
+  </div>
+</div>
+
 <div class="footer">Generated from source data &mdash; Jan&ndash;May 2025 vs 2026 &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
 </div>
 
@@ -473,6 +534,10 @@ var OTHER=__OTHER_DATA__;
 var PD=__PD_DATA__;
 var PD_MAP={};
 for(var i=0;i<PD.length;i++){PD_MAP[PD[i].office]=PD[i];}
+
+var DS=__DS_DATA__;
+var DS_MAP={};
+for(var i=0;i<DS.length;i++){DS_MAP[DS[i].office]=DS[i];}
 
 // Flatten PD into a single cross-office list of named providers (Tab 3)
 var PR_ALL=[];
@@ -1063,15 +1128,132 @@ function togT3(key,r){
   }
 }
 
+// ── TAB 4 — DATA SUMMARY (show your work) ─────────────────────────────────────
+var T4_METRICS=[
+  {key:'np',     label:'Net Production', fmt:'cur'},
+  {key:'visits', label:'Visits',        fmt:'int'},
+  {key:'drdays', label:'Doctor Days',   fmt:'dec'},
+  {key:'newpat', label:'New Patients',  fmt:'int'},
+  {key:'spv',    label:'$/Visit',       fmt:'cur'},
+  {key:'vdd',    label:'Vis/DrDay',     fmt:'dec'},
+  {key:'rpd',    label:'Rev/Day',       fmt:'cur'}
+];
+function t4fmt(v,fmt){return fmt==='cur'?fd(v):(fmt==='int'?fn(v):fv(v));}
+
+// One metric × one year row (6 value cells: Jan..May + YTD Total).
+function t4Row(label,year,arr,fmt,yclass){
+  var cells='';
+  for(var i=0;i<6;i++){
+    cells+='<td class="'+(i===5?'ds-ytd':'')+'">'+t4fmt(arr[i],fmt)+'</td>';
+  }
+  return '<tr class="'+yclass+'">'
+    +'<td class="l ds-metric">'+label+'</td>'
+    +'<td class="l">'+year+'</td>'
+    +cells+'</tr>';
+}
+
+// One grouped data block (office or provider): header + 7 metrics × 2 years.
+function t4Block(name,state,metrics,isProvider){
+  var thead='<tr><th class="l" style="width:16%">Metric</th><th class="l" style="width:9%">Year</th>'
+    +'<th>Jan</th><th>Feb</th><th>Mar</th><th>Apr</th><th>May</th><th class="ds-ytd">YTD Total</th></tr>';
+  var hdrCls=isProvider?'ds-hdr provider':'ds-hdr office';
+  var st=(state&&state!=='&mdash;'&&state!=='—')?'<span class="ds-state">'+state+'</span>':'';
+  var rows='<tr class="'+hdrCls+'"><td colspan="8">'+name+st+'</td></tr>';
+  rows+=thead;
+  for(var m=0;m<T4_METRICS.length;m++){
+    var mt=T4_METRICS[m];
+    rows+=t4Row(mt.label,'2025',metrics.y1[mt.key],mt.fmt,'ds-y25');
+    rows+=t4Row('',      '2026',metrics.y2[mt.key],mt.fmt,'ds-y26');
+  }
+  return '<div class="ds-block"><table class="ds">'+rows+'</table></div>';
+}
+
+function t4OfficeOptions(){
+  var state=document.getElementById('t4State').value;
+  var sel=document.getElementById('t4Office');
+  var html='<option value="all">All Offices</option>';
+  for(var i=0;i<DS.length;i++){
+    var o=DS[i];
+    if(state&&o.state!==state)continue;
+    var nm=o.office.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    html+='<option value="'+nm+'">'+o.office.replace(/&/g,'&amp;')+'</option>';
+  }
+  sel.innerHTML=html;
+  sel.value='all';
+}
+
+function t4ProviderOptions(){
+  var officeName=document.getElementById('t4Office').value;
+  var sel=document.getElementById('t4Provider');
+  var html='<option value="all">All Providers</option>';
+  if(officeName==='all'){
+    sel.innerHTML=html;sel.value='all';sel.disabled=true;return;
+  }
+  sel.disabled=false;
+  var o=DS_MAP[officeName];
+  if(o){
+    for(var i=0;i<o.providers.length;i++){
+      var pn=o.providers[i].name.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+      html+='<option value="'+pn+'">'+o.providers[i].name.replace(/&/g,'&amp;')+'</option>';
+    }
+  }
+  sel.innerHTML=html;sel.value='all';
+}
+
+function renderT4(){
+  var state=document.getElementById('t4State').value;
+  var officeName=document.getElementById('t4Office').value;
+  var providerName=document.getElementById('t4Provider').value;
+  var html='';
+
+  if(officeName==='all'){
+    // All offices (optionally filtered by state) — office-level blocks only.
+    var n=0;
+    for(var i=0;i<DS.length;i++){
+      var o=DS[i];
+      if(state&&o.state!==state)continue;
+      html+=t4Block(o.office,o.state,o.metrics,false);
+      n++;
+    }
+    html='<div class="ds-sub">Showing <strong>'+n+'</strong> office'+(n===1?'':'s')
+      +(state?' in '+state:'')+' &mdash; office-level totals. Select a single office to see its provider breakdown.</div>'+html;
+  } else {
+    var o=DS_MAP[officeName];
+    if(!o){document.getElementById('t4Wrap').innerHTML='<div class="empty-state"><p>No data for this office.</p></div>';return;}
+    if(providerName!=='all'){
+      // Single provider — that provider's data only.
+      var prov=null;
+      for(var i=0;i<o.providers.length;i++){if(o.providers[i].name===providerName){prov=o.providers[i];break;}}
+      if(prov){
+        html='<div class="ds-sub"><strong>'+o.office+'</strong> &mdash; '+o.state+' &bull; provider: <strong>'+prov.name+'</strong></div>';
+        html+=t4Block(prov.name,o.state,prov.metrics,true);
+      } else {
+        html='<div class="empty-state"><p>Provider not found.</p></div>';
+      }
+    } else {
+      // Single office — office block plus every named-provider block.
+      html='<div class="ds-sub"><strong>'+o.office+'</strong> &mdash; '+o.state
+        +' &bull; office total + <strong>'+o.providers.length+'</strong> named provider'+(o.providers.length===1?'':'s')+'</div>';
+      html+=t4Block(o.office,o.state,o.metrics,false);
+      for(var i=0;i<o.providers.length;i++){
+        html+=t4Block(o.providers[i].name,o.state,o.providers[i].metrics,true);
+      }
+    }
+  }
+  document.getElementById('t4Wrap').innerHTML=html;
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(n){
   currentTab=n;
   document.getElementById('tab1').style.display=n===1?'':'none';
   document.getElementById('tab2').style.display=n===2?'':'none';
   document.getElementById('tab3').style.display=n===3?'':'none';
+  document.getElementById('tab4').style.display=n===4?'':'none';
   document.getElementById('navTab1').className='nav-tab'+(n===1?' on':'');
   document.getElementById('navTab2').className='nav-tab'+(n===2?' on':'');
   document.getElementById('navTab3').className='nav-tab'+(n===3?' on':'');
+  document.getElementById('navTab4').className='nav-tab'+(n===4?' on':'');
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
@@ -1080,10 +1262,16 @@ document.getElementById('t1Search').addEventListener('input',renderT1);
 ['t2OfficeSel','t2Sort','t2Metric','t2Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT2);});
 ['t3Show','t3Metric','t3State','t3Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
 document.getElementById('t3Search').addEventListener('input',renderT3);
+document.getElementById('t4State').addEventListener('change',function(){t4OfficeOptions();t4ProviderOptions();renderT4();});
+document.getElementById('t4Office').addEventListener('change',function(){t4ProviderOptions();renderT4();});
+document.getElementById('t4Provider').addEventListener('change',renderT4);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderT1();
 renderT3();
+t4OfficeOptions();
+t4ProviderOptions();
+renderT4();
 </script>
 </body>
 </html>

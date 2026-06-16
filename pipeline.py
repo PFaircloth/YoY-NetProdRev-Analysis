@@ -263,6 +263,72 @@ def build_office_data():
     return result
 
 
+def _ds_metrics(rows):
+    """Build the Data Summary 7-metric structure for one entity (office or
+    provider), split by year. Monthly values are INDIVIDUAL-month actuals (not
+    YTD-cumulative). Each metric array is length 6: the 5 months + YTD Total.
+
+    Additive metrics (np, visits, drdays, newpat) → YTD is the sum of months.
+    Ratio metrics (spv, vdd, rpd) → YTD is recomputed from the YTD totals, the
+    correct production-weighted figure (summing monthly ratios is meaningless).
+    """
+    def per_year(year):
+        yr = rows[rows["year_num"] == year]
+        npv, vv, ddv, npcv, spvv, vddv, rpdv = [], [], [], [], [], [], []
+        for m in config.MONTHS:
+            mr = yr[yr["month_num"] == m]
+            np_  = _safe(mr["NET PRODUCTION"].sum()) or 0.0
+            v_   = _safe(mr["VISITS"].sum()) or 0.0
+            dd_  = _safe(mr["DOCTOR DAYS"].sum()) or 0.0
+            npc_ = _safe(mr["NEW PATIENT COUNT"].sum()) or 0.0
+            wd   = config.WORKING_DAYS.get((m, year), 0.0)
+            npv.append(np_);  vv.append(v_);  ddv.append(dd_);  npcv.append(npc_)
+            spvv.append(np_ / v_  if v_  > 0 else None)
+            vddv.append(v_  / dd_ if dd_ > 0 else None)
+            rpdv.append(np_ / wd  if wd       else None)
+
+        np_t  = sum(npv);  v_t = sum(vv);  dd_t = sum(ddv);  npc_t = sum(npcv)
+        wd_t  = sum(config.WORKING_DAYS.get((m, year), 0.0) for m in config.MONTHS)
+        return {
+            "np":     npv  + [np_t],
+            "visits": vv   + [v_t],
+            "drdays": ddv  + [dd_t],
+            "newpat": npcv + [npc_t],
+            "spv":    spvv + [np_t / v_t  if v_t  > 0 else None],
+            "vdd":    vddv + [v_t  / dd_t if dd_t > 0 else None],
+            "rpd":    rpdv + [np_t / wd_t if wd_t      else None],
+        }
+    return {"y1": per_year(config.YEAR_1), "y2": per_year(config.YEAR_2)}
+
+
+def build_data_summary():
+    """Per-office and per-named-provider monthly actuals — the 'show your work'
+    source-data view (Data Summary tab). Office totals from SUMMARY rows,
+    provider breakdown from DETAIL rows, named providers via the same 90%/2%
+    qualifying filter as the Provider Deep Dive tab."""
+    summary_df, detail_df = load_source_data()
+    result = []
+
+    for od in config.OFFICE_LIST:
+        oname = od["name"]
+        orows = summary_df[summary_df["OFFICE"] == oname]
+        prows_all = detail_df[detail_df["OFFICE"] == oname]
+
+        providers = []
+        for pname in get_qualifying_providers(prows_all):
+            prows = prows_all[prows_all["PROVIDER"] == pname]
+            providers.append({"name": pname, "metrics": _ds_metrics(prows)})
+
+        result.append({
+            "office":    oname,
+            "state":     od["state"],
+            "metrics":   _ds_metrics(orows),
+            "providers": providers,
+        })
+
+    return result
+
+
 def build_provider_data():
     _, detail_df = load_source_data()
     pmap, pfallback, _ = load_provider_map()

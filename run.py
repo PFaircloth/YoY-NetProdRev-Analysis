@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 import config
-from pipeline import build_office_data, build_provider_data
+from pipeline import build_office_data, build_provider_data, build_data_summary
 from report import generate_html
 
 _OUTPUT_DIR = os.path.dirname(config.OUTPUT_FILE)
@@ -32,6 +32,7 @@ def main():
     print("Loading source data…")
     office_data   = build_office_data()
     provider_data = build_provider_data()
+    data_summary  = build_data_summary()
 
     named_offices   = [o for o in office_data if not o["is_other"]]
     total_providers = sum(
@@ -41,7 +42,7 @@ def main():
     print(f"  {len(named_offices)} offices · {total_providers} named providers")
 
     print("Generating HTML report…")
-    html = generate_html(office_data, provider_data)
+    html = generate_html(office_data, provider_data, data_summary)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
