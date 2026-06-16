@@ -204,8 +204,6 @@ td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
 .nc{color:#C0392B;font-weight:600}.pc{color:#1a7a4a;font-weight:600}
 .other-sep{border-top:1.5px solid #ccc!important}
 .other-row td{color:#999;font-style:italic}
-.future-start-row td{background:#FFE8CC!important}
-.future-start-row:hover td{background:#FFD9A8!important}
 /* Provider tab empty state */
 .empty-state{text-align:center;padding:48px 24px;color:#aaa}
 .empty-state .icon{font-size:36px;margin-bottom:12px}
@@ -250,7 +248,6 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 <div class="nav-tabs">
   <button class="nav-tab on" id="navTab1" onclick="switchTab(1)">&#127970; Office Analysis</button>
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
-  <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128218; Legend</button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -373,33 +370,6 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
         <p>Select an office from the dropdown above to see provider performance</p>
       </div>
     </div>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════
-     TAB 3 — LEGEND
-════════════════════════════════════════════════════ -->
-<div id="tab3" style="display:none">
-  <div class="card" style="max-width:820px">
-    <h3 style="font-size:14px;font-weight:700;color:#1F3864;margin-bottom:14px">Row &amp; Cell Highlighting</h3>
-    <table style="border-collapse:collapse;width:100%;font-size:12px;margin-bottom:20px">
-      <thead>
-        <tr style="background:#1F3864;color:#fff">
-          <th style="padding:8px 12px;text-align:left;width:180px">Visual</th>
-          <th style="padding:8px 12px;text-align:left">Meaning</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td style="padding:8px 12px;border-bottom:1px solid #eee">
-            <span style="display:inline-block;background:#FFE8CC;border:1px solid #e0c090;border-radius:3px;padding:3px 14px;font-size:11px">Peach row</span>
-          </td>
-          <td style="padding:8px 12px;border-bottom:1px solid #eee;line-height:1.5">
-            Peach highlighted rows &mdash; office contains at least one provider forecasted using future start assumptions (FUTURE_START_ASSUMPTIONS_RAMP). Forecasts for these offices carry higher uncertainty than purely historical projections.
-          </td>
-        </tr>
-      </tbody>
-    </table>
   </div>
 </div>
 
@@ -608,7 +578,7 @@ function renderT1(){
       cells+='<td style="'+hcol(v,metric)+'">'+fm(v,metric)+extra+'</td>';
     }
     var key='t1_'+i;
-    rows+='<tr class="dr'+(r.isFutureStart?' future-start-row':'')+'" data-key="'+key+'" data-idx="'+i+'">'
+    rows+='<tr class="dr" data-key="'+key+'" data-idx="'+i+'">'
       +'<td class="rk">'+(i+1)+'</td>'
       +'<td class="l">'+r.office+' <span class="arrow" id="a'+key+'">&#8250;</span></td>'
       +'<td class="st">'+r.state+'</td>'+cells
@@ -811,10 +781,8 @@ function switchTab(n){
   currentTab=n;
   document.getElementById('tab1').style.display=n===1?'':'none';
   document.getElementById('tab2').style.display=n===2?'':'none';
-  document.getElementById('tab3').style.display=n===3?'':'none';
   document.getElementById('navTab1').className='nav-tab'+(n===1?' on':'');
   document.getElementById('navTab2').className='nav-tab'+(n===2?' on':'');
-  document.getElementById('navTab3').className='nav-tab'+(n===3?' on':'');
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
