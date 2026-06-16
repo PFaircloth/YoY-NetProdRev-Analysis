@@ -400,18 +400,13 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   </div>
   <div class="card">
     <div class="ctrl-row">
-      <label>Provider type:</label>
-      <select id="t3PType">
-        <option value="doctors" selected>Doctors Only</option>
-        <option value="all">All Provider Types</option>
-      </select>
       <label>Show:</label>
       <select id="t3Show">
         <option value="25">Top 25</option>
         <option value="50">Top 50</option>
         <option value="100">Top 100</option>
         <option value="150">Top 150</option>
-        <option value="all" id="t3ShowAll" selected>All 359 providers</option>
+        <option value="all" id="t3ShowAll" selected>All doctors</option>
       </select>
       <label>Metric:</label>
       <select id="t3Metric">
@@ -922,19 +917,18 @@ function togT2Prov(pkey,prov){
   }
 }
 
-// ── TAB 3 — PROVIDER RANK VIEW ────────────────────────────────────────────────
-// Doctor-type universe: General Dentist + dental specialists (excludes Hygienist and Other)
+// ── TAB 3 — DOCTOR RANK VIEW ──────────────────────────────────────────────────
+// View is locked to the doctor-type universe: General Dentist + dental
+// specialists (excludes Hygienist and Other).
 var DOCTOR_TYPES={'General Dentist':1,'Prosthodontist':1,'Oral Surgeon':1,'Periodontist':1,'Orthodontist':1,'Pedodontist':1,'Endodontist':1};
 var T3_DOCTOR_COUNT=PR_ALL.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];}).length;
-var T3_ALL_COUNT=PR_ALL.length;
+var PR_DOCTORS=PR_ALL.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];});
 function getT3Data(){
   var show=document.getElementById('t3Show').value;
   var state=document.getElementById('t3State').value;
   var search=document.getElementById('t3Search').value.toLowerCase();
-  var ptype=document.getElementById('t3PType').value;
   var dir=document.getElementById('t3Dir').value;
-  var data=PR_ALL.slice();
-  if(ptype==='doctors')data=data.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];});
+  var data=PR_DOCTORS.slice();
   if(dir!=='all')data=data.filter(function(r){return dirPass(r.checkpoints,dir);});
   if(state)data=data.filter(function(r){return r.state===state;});
   if(search)data=data.filter(function(r){
@@ -942,7 +936,7 @@ function getT3Data(){
   });
   data.sort(function(a,b){return (a.sortDelta||0)-(b.sortDelta||0);});
   if(show!=='all'){data=data.slice(0,parseInt(show));}
-  return {data:data,show:show,state:state,search:search,ptype:ptype,dir:dir};
+  return {data:data,show:show,state:state,search:search,dir:dir};
 }
 
 function renderT3(){
@@ -955,8 +949,8 @@ function renderT3(){
   var np25=0,np26=0;
   data.forEach(function(r){var cp=r.checkpoints[4];np25+=(cp.np2025||0);np26+=(cp.np2026||0);});
   var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25;
-  document.getElementById('t3KpiProvsLbl').innerHTML=(res.ptype==='doctors')?'Doctors shown':'Providers shown';
-  document.getElementById('t3ShowAll').textContent=(res.ptype==='doctors')?('All '+T3_DOCTOR_COUNT+' doctors'):('All '+T3_ALL_COUNT+' providers');
+  document.getElementById('t3KpiProvsLbl').innerHTML='Doctors shown';
+  document.getElementById('t3ShowAll').textContent='All '+T3_DOCTOR_COUNT+' doctors';
   sk('t3KpiProvs',data.length.toLocaleString(),false);
   sk('t3Kpi25',fk(rpd25),false);
   sk('t3Kpi26',fk(rpd26),rpd26<rpd25);
@@ -968,10 +962,9 @@ function renderT3(){
   var isFiltered=(res.show!=='all')||res.state||res.search||res.dir!=='all';
   var bar=document.getElementById('t3ScopeBar');
   if(isFiltered){
-    var showLabels={25:'Top 25',50:'Top 50',100:'Top 100',150:'Top 150',all:'All providers'};
+    var showLabels={25:'Top 25',50:'Top 50',100:'Top 100',150:'Top 150',all:'All doctors'};
     var dirLabels={decl:'Declining',grow:'Growing'};
     var parts=[showLabels[res.show]||res.show];
-    if(res.ptype==='doctors')parts.push('Doctors only');
     if(res.dir!=='all')parts.push(dirLabels[res.dir]||res.dir);
     if(res.state)parts.push(res.state);
     if(res.search)parts.push('"'+res.search+'"');
@@ -1083,7 +1076,7 @@ function switchTab(n){
 ['t1Show','t1Metric','t1State','t1Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT1);});
 document.getElementById('t1Search').addEventListener('input',renderT1);
 ['t2OfficeSel','t2Sort','t2Metric','t2Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT2);});
-['t3PType','t3Show','t3Metric','t3State','t3Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
+['t3Show','t3Metric','t3State','t3Dir'].forEach(function(id){document.getElementById(id).addEventListener('change',renderT3);});
 document.getElementById('t3Search').addEventListener('input',renderT3);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
