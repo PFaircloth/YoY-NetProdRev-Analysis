@@ -1,0 +1,6 @@
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+
+# Generated reports (built by `python3 run.py`)
+output/
