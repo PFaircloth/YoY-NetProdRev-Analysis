@@ -61,3 +61,6 @@ Recommend dedicated project sprint.
 - SharePoint/email distribution pipeline
 - Azure Static Web Apps hosting
 - Monthly automated refresh — drop in new source file, run one command
+- `data/A...xlsx` is a tracked data file — reconsider whether source data belongs in
+  version control; likely should be gitignored and kept out of the repo, with a
+  documented load process instead.
