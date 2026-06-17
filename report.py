@@ -1,5 +1,6 @@
 import json
 import config
+import pipeline
 
 # ── Data transformation: pipeline format → reference JS format ────────────────
 
@@ -45,7 +46,7 @@ def _transform_offices(office_data):
             "state":          o["state"] or "—",
             "isOther":        o["is_other"],
             "isFutureStart":  o.get("is_future_start", False),
-            "sortDelta":      o["checkpoints"][4]["drd"],
+            "sortDelta":      o["checkpoints"][-1]["drd"],
             "checkpoints":    [_tcp(cp) for cp in o["checkpoints"]],
         }
         if o["is_other"]:
@@ -72,13 +73,13 @@ def _transform_providers(provider_data):
                 "provider":    p["name"],
                 "ptype":       p["ptype"],
                 "isNew":       p["is_new"],
-                "sortDelta":   p["checkpoints"][4]["drd"],
+                "sortDelta":   p["checkpoints"][-1]["drd"],
                 "checkpoints": [_tcp(cp) for cp in p["checkpoints"]],
             })
         PD.append({
             "office":         od["office"],
             "state":          od["state"],
-            "sortDelta":      providers[0]["checkpoints"][4]["dRD"] if providers else None,
+            "sortDelta":      providers[0]["checkpoints"][-1]["dRD"] if providers else None,
             "providers":      providers,
             "otherProviders": other_obj,
         })
@@ -138,8 +139,20 @@ def generate_html(office_data, provider_data, data_summary):
 
     t2_opts = _t2_options(office_data)
 
-    wd_y1 = round(sum(config.WORKING_DAYS.get((m, config.YEAR_1), 0) for m in config.MONTHS), 1)
-    wd_y2 = round(sum(config.WORKING_DAYS.get((m, config.YEAR_2), 0) for m in config.MONTHS), 1)
+    # ── Month metadata: single source of truth, derived from the data ─────────
+    months = pipeline.get_active_months()
+    mtd = config.MTD_MONTH
+    mtd_active = mtd in months and months[-1] == mtd   # partial month is the latest
+    labels = [pipeline.MONTH_LABELS[m] + (" (MTD)" if (mtd_active and m == mtd) else "")
+              for m in months]
+    rng = (pipeline.MONTH_LABELS[months[0]] + "&ndash;" + pipeline.MONTH_LABELS[months[-1]]
+           + " " + str(config.YEAR_1) + " vs " + str(config.YEAR_2))
+    mtd_label = pipeline.MONTH_LABELS[mtd] if mtd_active else ""
+    mtd_hint = (" <strong>" + labels[-1] + "</strong> = month-to-date (partial month); "
+                "KPIs and YTD include it &mdash; not a full-month figure." if mtd_active else "")
+
+    wd_y1 = round(sum(config.WORKING_DAYS.get((m, config.YEAR_1), 0) for m in months), 1)
+    wd_y2 = round(sum(config.WORKING_DAYS.get((m, config.YEAR_2), 0) for m in months), 1)
 
     html = _TEMPLATE
     html = html.replace("__D_DATA__",     D_json)
@@ -149,6 +162,12 @@ def generate_html(office_data, provider_data, data_summary):
     html = html.replace("__T2_OPTIONS__", t2_opts)
     html = html.replace("__WD25__",       str(wd_y1))
     html = html.replace("__WD26__",       str(wd_y2))
+    html = html.replace("__MO_LABELS__",  json.dumps(labels, ensure_ascii=False))
+    html = html.replace("__RANGE__",      rng)
+    html = html.replace("__LASTMO__",     labels[-1])
+    html = html.replace("__MTD_LABEL__",  json.dumps(mtd_label, ensure_ascii=False))
+    html = html.replace("__MTD_ACTIVE__", "true" if mtd_active else "false")
+    html = html.replace("__MTD_HINT__",   mtd_hint)
     return html
 
 
@@ -159,7 +178,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Revenue Driver Analysis — Jan–May 2025 vs 2026</title>
+<title>Revenue Driver Analysis — __RANGE__</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:13px;background:#f0f2f5;color:#222}
@@ -183,6 +202,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;fo
 .kpi-lbl{font-size:11px;color:#888;margin-bottom:4px}
 .kpi-val{font-size:20px;font-weight:600;color:#222}
 .kpi-val.neg{color:#C0392B}.kpi-val.pos{color:#1a7a4a}
+/* Month-to-date (partial month) flag on KPI ribbons */
+.mtd-flag{background:#fff8e1;border:0.5px solid #f0d68a;color:#8a6d3b;font-size:11px;font-weight:500;padding:6px 12px;border-radius:6px;margin:-6px 0 14px}
+.mtd-flag:empty{display:none}
 /* Card */
 .card{background:#fff;border:0.5px solid #ddd;border-radius:8px;padding:16px;margin-bottom:14px}
 .ctrl-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
@@ -345,7 +367,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 <div class="page">
 
 <div class="header">
-  <h1>Revenue Driver Analysis &mdash; Jan&ndash;May 2025 vs 2026</h1>
+  <h1>Revenue Driver Analysis &mdash; __RANGE__</h1>
   <p>Rev/Day = $/Visit &times; Visits/Dr Day &times; Dr Days/Day &nbsp;&bull;&nbsp; 76 offices &nbsp;&bull;&nbsp; 359 named providers &nbsp;&bull;&nbsp; Providers filtered to material contributors only: cumulative 90% of office production + 2% individual floor (ranked by peak year production &mdash; captures new providers) &nbsp;&bull;&nbsp; Noise providers (temp, insurance, unassigned, etc.) excluded</p>
 </div>
 
@@ -369,6 +391,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
     <div class="kpi"><div class="kpi-lbl">YTD production gap</div><div class="kpi-val" id="t1KpiGap">&mdash;</div></div>
     <div class="kpi"><div class="kpi-lbl">New patients lost YTD</div><div class="kpi-val" id="t1KpiNP">&mdash;</div></div>
   </div>
+  <div class="mtd-flag" id="t1Mtd"></div>
   <div class="card">
     <div class="ctrl-row">
       <label>Show:</label>
@@ -414,7 +437,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
         <span class="tl-item"><span class="hm-swatch" style="background:#0f5032"></span>+$2,000+</span>
       </div>
       <div class="trend-legend-row">
-        <span class="tl-lbl">YTD May trend:</span>
+        <span class="tl-lbl">YTD __LASTMO__ trend:</span>
         <span class="tl-item"><span class="trend-up">&#8593;</span> Improving &mdash; gap narrowing vs first available month</span>
         <span class="tl-item"><span class="trend-dn">&#8595;</span> Worsening &mdash; gap widening vs first available month</span>
         <span class="tl-item"><span class="trend-fl">&#8594;</span> Stable &mdash; within &plusmn;5% of first available month</span>
@@ -436,6 +459,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
     <div class="kpi"><div class="kpi-lbl">Rev/Day 2026</div><div class="kpi-val" id="t2Kpi26">&mdash;</div></div>
     <div class="kpi"><div class="kpi-lbl">&Delta; Rev/Day</div><div class="kpi-val" id="t2KpiDelta">&mdash;</div></div>
   </div>
+  <div class="mtd-flag" id="t2Mtd"></div>
   <div class="card">
     <div class="ctrl-row">
       <label>Office:</label>
@@ -475,7 +499,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
         <span class="tl-item"><span class="hm-swatch" style="background:#0f5032"></span>+$2,000+</span>
       </div>
       <div class="trend-legend-row">
-        <span class="tl-lbl">YTD May trend:</span>
+        <span class="tl-lbl">YTD __LASTMO__ trend:</span>
         <span class="tl-item"><span class="trend-up">&#8593;</span> Improving &mdash; gap narrowing vs first available month</span>
         <span class="tl-item"><span class="trend-dn">&#8595;</span> Worsening &mdash; gap widening vs first available month</span>
         <span class="tl-item"><span class="trend-fl">&#8594;</span> Stable &mdash; within &plusmn;5% of first available month</span>
@@ -503,6 +527,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
     <div class="kpi"><div class="kpi-lbl" id="t3Lbl26">DSO Rev/Day &mdash; 2026</div><div class="kpi-val" id="t3Kpi26">&mdash;</div></div>
     <div class="kpi"><div class="kpi-lbl">&Delta; Rev/Day</div><div class="kpi-val" id="t3KpiDelta">&mdash;</div></div>
   </div>
+  <div class="mtd-flag" id="t3Mtd"></div>
   <div class="card">
     <div class="ctrl-row">
       <label>Show:</label>
@@ -555,7 +580,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
         <span class="tl-item"><span class="badge badge-spec">Specialist</span></span>
         <span class="tl-item"><span class="badge badge-new">NEW</span></span>
         <span class="tl-div"></span>
-        <span class="tl-lbl">YTD May trend:</span>
+        <span class="tl-lbl">YTD __LASTMO__ trend:</span>
         <span class="tl-item"><span class="trend-up">&#8593;</span> Improving</span>
         <span class="tl-item"><span class="trend-dn">&#8595;</span> Worsening</span>
         <span class="tl-item"><span class="trend-fl">&#8594;</span> Stable</span>
@@ -584,17 +609,22 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
       <label>Office:</label>
       <select id="t4Office" class="big"></select>
     </div>
-    <div class="hint">Transparent view of the underlying source data driving every calculation &mdash; monthly values are individual-month actuals; YTD Total sums the months (ratio metrics recomputed from YTD totals). Currency rounded to whole dollars. <strong>Jun MTD</strong> = month-to-date through 6/16 (both years), a partial month. <em>Rev/Day excludes June (June working-days not yet configured): its June cell is blank and its Rev/Day YTD is approximate.</em></div>
+    <div class="hint">Transparent view of the underlying source data driving every calculation &mdash; monthly values are individual-month actuals; YTD Total sums the months (ratio metrics recomputed from YTD totals). Currency rounded to whole dollars.__MTD_HINT__</div>
     <div id="t4Wrap"></div>
   </div>
 </div>
 
-<div class="footer">Generated from source data &mdash; Jan&ndash;May 2025 vs 2026 &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
+<div class="footer">Generated from source data &mdash; __RANGE__ &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
 </div>
 
 <script>
-var MO=['Jan','Feb','Mar','Apr','May'];
+var MO=__MO_LABELS__;            // active-month labels (partial month carries " MTD")
+var MTD_LABEL=__MTD_LABEL__;     // e.g. "Jun" when a partial month is active, else ""
+var MTD_ON=__MTD_ACTIVE__;       // true when the latest active month is month-to-date
 var WD25=__WD25__,WD26=__WD26__;
+function lastCp(c){return c[c.length-1];}                         // latest YTD checkpoint
+function moHeaders(){return MO.map(function(m){return '<th>YTD '+m+'</th>';}).join('');}
+function mtdBanner(){return MTD_ON?'<div>&#9888; '+MTD_LABEL+' (MTD) is a partial month &mdash; KPI cards, YTD totals, and ordering include a month-to-date figure, not a full month.</div>':'';}
 
 var D=__D_DATA__;
 var OTHER=__OTHER_DATA__;
@@ -632,27 +662,27 @@ var currentTab=1;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function trendArrow(checkpoints){
   if(!checkpoints||checkpoints.length<2)return '';
-  var v_may=checkpoints[4].dRD;
-  if(v_may==null)return '';
+  var last=checkpoints.length-1;
+  var v_last=checkpoints[last].dRD;
+  if(v_last==null)return '';
   var v_base=null,base_mo='';
-  var moNames=['Jan','Feb','Mar','Apr'];
-  for(var i=0;i<4;i++){
-    if(checkpoints[i].dRD!=null){v_base=checkpoints[i].dRD;base_mo=moNames[i];break;}
+  for(var i=0;i<last;i++){
+    if(checkpoints[i].dRD!=null){v_base=checkpoints[i].dRD;base_mo=MO[i];break;}
   }
   if(v_base==null)return '';
-  var diff=v_may-v_base;
+  var diff=v_last-v_base;
   var pct=v_base!==0?Math.abs(diff/v_base)*100:0;
-  var tip='vs YTD '+base_mo+(base_mo!=='Jan'?' (first available)':'');
+  var tip='vs YTD '+base_mo+(base_mo!==MO[0]?' (first available)':'');
   if(pct<5)return '<span class="trend-fl" title="Stable within 5% — '+tip+'">&#8594;</span>';
   if(diff>0)return '<span class="trend-up" title="Improving — '+tip+'">&#8593;</span>';
   return '<span class="trend-dn" title="Worsening — '+tip+'">&#8595;</span>';
 }
 
-// Direction filter — uses YTD May (checkpoint index 4) Δ Rev/Day. Rows with a
+// Direction filter — uses the latest YTD checkpoint Δ Rev/Day. Rows with a
 // null/zero Δ are excluded from both Declining and Growing.
 function dirPass(checkpoints,dir){
   if(dir==='all'||!dir)return true;
-  var d=checkpoints&&checkpoints[4]?checkpoints[4].dRD:null;
+  var d=(checkpoints&&checkpoints.length)?lastCp(checkpoints).dRD:null;
   if(d==null)return false;
   return dir==='decl'?d<0:d>0;
 }
@@ -789,8 +819,8 @@ function renderT1(){
 
   // KPIs
   var np25=0,np26=0,nps25=0,nps26=0;
-  data.forEach(function(r){var cp=r.checkpoints[4];np25+=(cp.np2025||0);np26+=(cp.np2026||0);nps25+=(cp.nps2025||0);nps26+=(cp.nps2026||0);});
-  if(res.showOther){var ocp=OTHER.checkpoints[4];np25+=(ocp.np2025||0);np26+=(ocp.np2026||0);nps25+=(ocp.nps2025||0);nps26+=(ocp.nps2026||0);}
+  data.forEach(function(r){var cp=lastCp(r.checkpoints);np25+=(cp.np2025||0);np26+=(cp.np2026||0);nps25+=(cp.nps2025||0);nps26+=(cp.nps2026||0);});
+  if(res.showOther){var ocp=lastCp(OTHER.checkpoints);np25+=(ocp.np2025||0);np26+=(ocp.np2026||0);nps25+=(ocp.nps2025||0);nps26+=(ocp.nps2026||0);}
   var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25,gap=np26-np25,dNP=nps26-nps25;
   sk('t1Kpi25',fk(rpd25),false);
   sk('t1Kpi26',fk(rpd26),rpd26<rpd25);
@@ -800,6 +830,7 @@ function renderT1(){
   var scope=res.state?(' &mdash; '+res.state+(res.search?' | "'+res.search+'"':'')):( res.search?' &mdash; "'+res.search+'"':'');
   document.getElementById('t1Lbl25').innerHTML='Rev/Day 2025'+scope;
   document.getElementById('t1Lbl26').innerHTML='Rev/Day 2026'+scope;
+  document.getElementById('t1Mtd').innerHTML=mtdBanner();
 
   var isFiltered=(res.show!=='all')||res.state||res.search||res.dir!=='all';
   var bar=document.getElementById('t1ScopeBar');
@@ -818,7 +849,7 @@ function renderT1(){
     +'<th class="rk">#</th>'
     +'<th class="l" style="width:24%">Office</th>'
     +'<th class="l" style="width:8%">State</th>'
-    +'<th>YTD Jan</th><th>YTD Feb</th><th>YTD Mar</th><th>YTD Apr</th><th>YTD May</th>'
+    +moHeaders()
     +'</tr></thead>';
 
   var rows='';
@@ -828,7 +859,7 @@ function renderT1(){
     for(var j=0;j<r.checkpoints.length;j++){
       var v=metric==='delta'?r.checkpoints[j].dRD:r.checkpoints[j].pctRD;
       var extra='';
-      if(j===4&&metric==='delta'){extra=trendArrow(r.checkpoints);}
+      if(j===r.checkpoints.length-1&&metric==='delta'){extra=trendArrow(r.checkpoints);}
       cells+='<td style="'+hcol(v,metric)+'">'+fm(v,metric)+extra+'</td>';
     }
     var key='t1_'+i;
@@ -837,7 +868,7 @@ function renderT1(){
       +'<td class="l">'+r.office+' <span class="arrow" id="a'+key+'">&#8250;</span></td>'
       +'<td class="st">'+r.state+'</td>'+cells
       +'</tr>'
-      +'<tr class="drill-wrap" id="d'+key+'" style="display:none"><td colspan="8"><div id="dc'+key+'"></div></td></tr>';
+      +'<tr class="drill-wrap" id="d'+key+'" style="display:none"><td colspan="'+(3+MO.length)+'"><div id="dc'+key+'"></div></td></tr>';
   }
 
   if(res.showOther){
@@ -853,7 +884,7 @@ function renderT1(){
       +'<td class="l" style="color:#999;font-weight:400;font-style:italic">'+r2.office+' <span class="arrow" id="a'+okey+'">&#8250;</span></td>'
       +'<td class="st" style="color:#ccc">'+r2.state+'</td>'+ocells
       +'</tr>'
-      +'<tr class="drill-wrap" id="d'+okey+'" style="display:none"><td colspan="8"><div id="dc'+okey+'"></div></td></tr>';
+      +'<tr class="drill-wrap" id="d'+okey+'" style="display:none"><td colspan="'+(3+MO.length)+'"><div id="dc'+okey+'"></div></td></tr>';
   }
 
   document.getElementById('t1Wrap').innerHTML='<table class="hm">'+thead+'<tbody>'+rows+'</tbody></table>';
@@ -894,6 +925,7 @@ function togT1(key,r){
 // ── TAB 2 ─────────────────────────────────────────────────────────────────────
 function renderT2(){
   t2OpenProv=null;
+  document.getElementById('t2Mtd').innerHTML=mtdBanner();
   var officeName=document.getElementById('t2OfficeSel').value;
   var sort=document.getElementById('t2Sort').value;
   var metric=document.getElementById('t2Metric').value;
@@ -923,7 +955,7 @@ function renderT2(){
   var dirLabels={decl:' (declining)',grow:' (growing)'};
   if(dir==='all'&&offSummary){
     // No direction filter — show office-summary totals (includes Other providers)
-    var cp=offSummary.checkpoints[4];
+    var cp=lastCp(offSummary.checkpoints);
     sk('t2KpiProvs',offData.providers.length+' named providers',false);
     sk('t2Kpi25',fd(cp.rpd2025),false);
     sk('t2Kpi26',fd(cp.rpd2026),(cp.rpd2026||0)<(cp.rpd2025||0));
@@ -932,7 +964,7 @@ function renderT2(){
   } else {
     // Direction filter active — recompute Rev/Day from the visible providers
     var np25=0,np26=0;
-    provs.forEach(function(p){var c=p.checkpoints[4];np25+=(c.np2025||0);np26+=(c.np2026||0);});
+    provs.forEach(function(p){var c=lastCp(p.checkpoints);np25+=(c.np2025||0);np26+=(c.np2026||0);});
     var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25;
     sk('t2KpiProvs',provs.length+' named providers',false);
     sk('t2Kpi25',fd(rpd25),false);
@@ -948,12 +980,12 @@ function renderT2(){
 
   if(sort==='delta')provs.sort(function(a,b){return dir==='grow'?(b.sortDelta||0)-(a.sortDelta||0):(a.sortDelta||0)-(b.sortDelta||0);});
   else if(sort==='best')provs.sort(function(a,b){return (b.sortDelta||0)-(a.sortDelta||0);});
-  else if(sort==='np25')provs.sort(function(a,b){return (b.checkpoints[4].np2025||0)-(a.checkpoints[4].np2025||0);});
-  else if(sort==='np26')provs.sort(function(a,b){return (b.checkpoints[4].np2026||0)-(a.checkpoints[4].np2026||0);});
+  else if(sort==='np25')provs.sort(function(a,b){return (lastCp(b.checkpoints).np2025||0)-(lastCp(a.checkpoints).np2025||0);});
+  else if(sort==='np26')provs.sort(function(a,b){return (lastCp(b.checkpoints).np2026||0)-(lastCp(a.checkpoints).np2026||0);});
 
   var thead='<thead><tr>'
     +'<th class="l" style="width:25%">Provider</th>'
-    +'<th>YTD Jan</th><th>YTD Feb</th><th>YTD Mar</th><th>YTD Apr</th><th>YTD May</th>'
+    +moHeaders()
     +'<th>Rev/Day 25</th><th>Rev/Day 26</th><th>&Delta; Rev/Day</th>'
     +'</tr></thead>';
 
@@ -964,10 +996,10 @@ function renderT2(){
     for(var j=0;j<p.checkpoints.length;j++){
       var v=metric==='delta'?p.checkpoints[j].dRD:p.checkpoints[j].pctRD;
       var extra='';
-      if(j===4&&metric==='delta'){extra=trendArrow(p.checkpoints);}
+      if(j===p.checkpoints.length-1&&metric==='delta'){extra=trendArrow(p.checkpoints);}
       cells+='<td style="'+hcol(v,metric)+';font-size:10px">'+fm(v,metric)+extra+'</td>';
     }
-    var rpd25=p.checkpoints[4].rpd2025,rpd26=p.checkpoints[4].rpd2026;
+    var rpd25=lastCp(p.checkpoints).rpd2025,rpd26=lastCp(p.checkpoints).rpd2026;
     var drd=rpd25!=null&&rpd26!=null?rpd26-rpd25:null;
     var dCl=(drd||0)<0?'nc':'pc';
     var pkey='t2p'+i;
@@ -984,7 +1016,7 @@ function renderT2(){
       +'<td style="font-size:10px">'+fd(rpd26)+'</td>'
       +'<td style="font-size:10px" class="'+dCl+'">'+fd(drd)+'</td>'
       +'</tr>'
-      +'<tr class="prov-drill-wrap" id="d'+pkey+'" style="display:none"><td colspan="9"><div id="dc'+pkey+'"></div></td></tr>';
+      +'<tr class="prov-drill-wrap" id="d'+pkey+'" style="display:none"><td colspan="'+(4+MO.length)+'"><div id="dc'+pkey+'"></div></td></tr>';
   }
 
   var other=offData.otherProviders;
@@ -1081,8 +1113,9 @@ function renderT3(){
 
   // KPI ribbon — DSO Rev/Day across visible providers
   var np25=0,np26=0;
-  data.forEach(function(r){var cp=r.checkpoints[4];np25+=(cp.np2025||0);np26+=(cp.np2026||0);});
+  data.forEach(function(r){var cp=lastCp(r.checkpoints);np25+=(cp.np2025||0);np26+=(cp.np2026||0);});
   var rpd25=np25/WD25,rpd26=np26/WD26,dRD=rpd26-rpd25;
+  document.getElementById('t3Mtd').innerHTML=mtdBanner();
   document.getElementById('t3KpiProvsLbl').innerHTML='Doctors shown';
   document.getElementById('t3ShowAll').textContent='All '+T3_DOCTOR_COUNT+' doctors';
   sk('t3KpiProvs',data.length.toLocaleString(),false);
@@ -1111,7 +1144,7 @@ function renderT3(){
     +'<th class="l" style="width:26%">Provider</th>'
     +'<th class="l" style="width:18%">Office</th>'
     +'<th class="l" style="width:8%">State</th>'
-    +'<th>YTD Jan</th><th>YTD Feb</th><th>YTD Mar</th><th>YTD Apr</th><th>YTD May</th>'
+    +moHeaders()
     +'</tr></thead>';
 
   var rows='';
@@ -1121,7 +1154,7 @@ function renderT3(){
     for(var j=0;j<r.checkpoints.length;j++){
       var v=metric==='delta'?r.checkpoints[j].dRD:r.checkpoints[j].pctRD;
       var extra='';
-      if(j===4&&metric==='delta'){extra=trendArrow(r.checkpoints);}
+      if(j===r.checkpoints.length-1&&metric==='delta'){extra=trendArrow(r.checkpoints);}
       cells+='<td style="'+hcol(v,metric)+'">'+fm(v,metric)+extra+'</td>';
     }
     var badges='';
@@ -1137,7 +1170,7 @@ function renderT3(){
       +'<td class="st">'+r.office+'</td>'
       +'<td class="st">'+r.state+'</td>'+cells
       +'</tr>'
-      +'<tr class="prov-drill-wrap" id="d'+key+'" style="display:none"><td colspan="9"><div id="dc'+key+'"></div></td></tr>';
+      +'<tr class="prov-drill-wrap" id="d'+key+'" style="display:none"><td colspan="'+(4+MO.length)+'"><div id="dc'+key+'"></div></td></tr>';
   }
 
   if(!data.length){
@@ -1202,7 +1235,7 @@ var T4_METRICS=[
   {key:'spv',name:'$/Visit',fmt:'money'},{key:'vdd',name:'Vis/DrDay',fmt:'dec2'},
   {key:'rpd',name:'Rev/Day',fmt:'money'}
 ];
-var T4_MO=['Jan','Feb','Mar','Apr','May','Jun MTD'];
+var T4_MO=MO;
 var T4_THRESH=10;          // beats/trails-vs-office threshold (percentage points) — single constant for now
 var t4Detail='compact';    // compact | full — applies to office + provider rows alike
 var t4OpenMetrics={};       // metric name -> exploded

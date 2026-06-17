@@ -2,7 +2,26 @@ import math
 import pandas as pd
 import config
 
-MONTH_LABELS = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May"}
+MONTH_LABELS = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+                7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+
+_active_months = None
+
+
+def get_active_months():
+    """Single source of truth for the report's month window: the months present in
+    BOTH analysis years (intersection). Reads the source file directly (unfiltered)
+    so it can see which months exist per year. Flexes to any count — and naturally
+    excludes months only one year has (e.g. a partially-loaded prior year)."""
+    global _active_months
+    if _active_months is None:
+        df = pd.read_excel(config.SOURCE_FILE, sheet_name="NetProdRev_byOffice")
+        mn = pd.to_datetime(df["Month"]).dt.month
+        yr = df["Year"].astype(int)
+        y1 = set(mn[yr == config.YEAR_1])
+        y2 = set(mn[yr == config.YEAR_2])
+        _active_months = sorted(y1 & y2)
+    return _active_months
 _source_cache = None
 _pmap_cache = None
 
@@ -25,7 +44,7 @@ def load_source_data():
     df["month_num"] = pd.to_datetime(df["Month"]).dt.month
     df["year_num"] = df["Year"].astype(int)
 
-    mask = df["month_num"].isin(config.MONTHS) & df["year_num"].isin(
+    mask = df["month_num"].isin(get_active_months()) & df["year_num"].isin(
         [config.YEAR_1, config.YEAR_2]
     )
     df = df[mask].copy()
@@ -34,33 +53,6 @@ def load_source_data():
     detail_df = df[df["ROW_CLASS"] == "DETAIL"].copy()
     _source_cache = (summary_df, detail_df)
     return _source_cache
-
-
-_source_cache_ds = None
-
-
-def load_source_data_ds():
-    """Source rows for the Data Summary window (config.MONTHS_DS), kept separate
-    from load_source_data() so the rest of the model — checkpoints, Tabs 1-3,
-    provider qualification — stays on the Jan-May config.MONTHS scope. Only the
-    Data Summary metric arrays use this wider (June MTD) window."""
-    global _source_cache_ds
-    if _source_cache_ds is not None:
-        return _source_cache_ds
-
-    df = pd.read_excel(config.SOURCE_FILE, sheet_name="NetProdRev_byOffice")
-    df["month_num"] = pd.to_datetime(df["Month"]).dt.month
-    df["year_num"] = df["Year"].astype(int)
-
-    mask = df["month_num"].isin(config.MONTHS_DS) & df["year_num"].isin(
-        [config.YEAR_1, config.YEAR_2]
-    )
-    df = df[mask].copy()
-
-    summary_df = df[df["ROW_CLASS"] == "SUMMARY"].copy()
-    detail_df = df[df["ROW_CLASS"] == "DETAIL"].copy()
-    _source_cache_ds = (summary_df, detail_df)
-    return _source_cache_ds
 
 
 def load_provider_map():
@@ -131,7 +123,7 @@ def _yoy_pct(delta, baseline):
 
 def _build_checkpoints(rows_y1, rows_y2, include_levers=True):
     checkpoints = []
-    for m in config.MONTHS:
+    for m in get_active_months():
         wd1 = _wd_cumulative(config.YEAR_1, m)
         wd2 = _wd_cumulative(config.YEAR_2, m)
 
@@ -202,11 +194,11 @@ def _compute_trend(checkpoints):
             baseline_month = cp["label"]
             break
 
-    may_cp = checkpoints[-1]
-    if may_cp["drd"] is None or baseline is None:
+    last_cp = checkpoints[-1]
+    if last_cp["drd"] is None or baseline is None:
         return None, baseline_month
 
-    diff = may_cp["drd"] - baseline
+    diff = last_cp["drd"] - baseline
     pct_chg = abs(diff / abs(baseline)) * 100 if baseline != 0 else (100.0 if diff else 0.0)
 
     if pct_chg < 5:
@@ -300,7 +292,7 @@ def _ds_metrics(rows, months=None):
     correct production-weighted figure (summing monthly ratios is meaningless).
     """
     if months is None:
-        months = config.MONTHS
+        months = get_active_months()
     def per_year(year):
         yr = rows[rows["year_num"] == year]
         npv, vv, ddv, npcv, spvv, vddv, rpdv = [], [], [], [], [], [], []
@@ -334,13 +326,9 @@ def build_data_summary():
     """Per-office and per-named-provider monthly actuals — the 'show your work'
     source-data view (Data Summary tab). Office totals from SUMMARY rows,
     provider breakdown from DETAIL rows, named providers via the same 90%/2%
-    qualifying filter as the Provider Deep Dive tab.
-
-    Provider qualification uses the Jan-May window (load_source_data) so the
-    roster matches the Deep Dive tab exactly; the displayed metric arrays use the
-    wider Data Summary window (load_source_data_ds) so a June MTD column appears."""
-    _, detail_qual = load_source_data()            # Jan-May — qualification only
-    summary_df, detail_df = load_source_data_ds()  # config.MONTHS_DS — displayed metrics
+    qualifying filter as the Provider Deep Dive tab. Both qualification and the
+    metric arrays span the full active window (get_active_months)."""
+    summary_df, detail_df = load_source_data()
     result = []
 
     for od in config.OFFICE_LIST:
@@ -349,14 +337,14 @@ def build_data_summary():
         prows_all = detail_df[detail_df["OFFICE"] == oname]
 
         providers = []
-        for pname in get_qualifying_providers(detail_qual[detail_qual["OFFICE"] == oname]):
+        for pname in get_qualifying_providers(prows_all):
             prows = prows_all[prows_all["PROVIDER"] == pname]
-            providers.append({"name": pname, "metrics": _ds_metrics(prows, config.MONTHS_DS)})
+            providers.append({"name": pname, "metrics": _ds_metrics(prows)})
 
         result.append({
             "office":    oname,
             "state":     od["state"],
-            "metrics":   _ds_metrics(orows, config.MONTHS_DS),
+            "metrics":   _ds_metrics(orows),
             "providers": providers,
         })
 
