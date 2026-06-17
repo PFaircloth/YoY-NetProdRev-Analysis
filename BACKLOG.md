@@ -57,7 +57,10 @@ Recommend dedicated project sprint.
 
 ## Other Backlog Items
 
-- Partial month YTD support — config flag for Days Passed as denominator
+- ~~Partial month YTD support — config flag for Days Passed as denominator~~ **DONE**
+  (commit b4e6cf0): month handling is fully elastic — active months derived from the
+  data (year-intersection), all four tabs flex to N months, partial month flagged as
+  "<Mon> (MTD)" via `config.MTD_MONTH`, June working-days added so Rev/Day is exact.
 - SharePoint/email distribution pipeline
 - Azure Static Web Apps hosting
 - Monthly automated refresh — drop in new source file, run one command
