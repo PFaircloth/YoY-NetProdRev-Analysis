@@ -584,7 +584,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
       <label>Office:</label>
       <select id="t4Office" class="big"></select>
     </div>
-    <div class="hint">Transparent view of the underlying source data driving every calculation &mdash; monthly values are individual-month actuals; YTD Total sums the months (ratio metrics recomputed from YTD totals). Currency rounded to whole dollars.</div>
+    <div class="hint">Transparent view of the underlying source data driving every calculation &mdash; monthly values are individual-month actuals; YTD Total sums the months (ratio metrics recomputed from YTD totals). Currency rounded to whole dollars. <strong>Jun MTD</strong> = month-to-date through 6/16 (both years), a partial month. <em>Rev/Day excludes June (June working-days not yet configured): its June cell is blank and its Rev/Day YTD is approximate.</em></div>
     <div id="t4Wrap"></div>
   </div>
 </div>
@@ -1202,7 +1202,7 @@ var T4_METRICS=[
   {key:'spv',name:'$/Visit',fmt:'money'},{key:'vdd',name:'Vis/DrDay',fmt:'dec2'},
   {key:'rpd',name:'Rev/Day',fmt:'money'}
 ];
-var T4_MO=['Jan','Feb','Mar','Apr','May'];
+var T4_MO=['Jan','Feb','Mar','Apr','May','Jun MTD'];
 var T4_THRESH=10;          // beats/trails-vs-office threshold (percentage points) — single constant for now
 var t4Detail='compact';    // compact | full — applies to office + provider rows alike
 var t4OpenMetrics={};       // metric name -> exploded
@@ -1226,7 +1226,7 @@ function t4pctSpan(p){
 }
 function t4Entity(metrics){
   function side(y){var o={};for(var k=0;k<T4_METRICS.length;k++){var m=T4_METRICS[k],a=metrics[y][m.key]||[];
-    o[m.name]={mo:a.slice(0,5),ytd:a.length>5?a[5]:null,fmt:m.fmt};}return o;}
+    o[m.name]={mo:a.slice(0,Math.max(0,a.length-1)),ytd:a.length>1?a[a.length-1]:null,fmt:m.fmt};}return o;}
   return {y25:side('y1'),y26:side('y2')};
 }
 
@@ -1282,7 +1282,7 @@ function t4ControlsHTML(){
 
 function t4MetricRowCells(ent,m,offRefYtd){
   var b=ent.y26[m.name],a=ent.y25[m.name],cells='';
-  for(var j=0;j<5;j++)cells+=t4GridCell(b.mo[j],a.mo[j],m.fmt,false,undefined);
+  for(var j=0;j<b.mo.length;j++)cells+=t4GridCell(b.mo[j],a.mo[j],m.fmt,false,undefined);
   cells+=t4GridCell(b.ytd,a.ytd,m.fmt,true,offRefYtd);
   return cells;
 }

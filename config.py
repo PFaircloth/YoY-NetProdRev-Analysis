@@ -2,6 +2,10 @@ ANALYSIS_PERIOD = "Jan–May 2025 vs Jan–May 2026"
 YEAR_1 = 2025
 YEAR_2 = 2026
 MONTHS = [1, 2, 3, 4, 5]
+# Data Summary (Tab 4) window only — kept separate from MONTHS so the rest of the
+# model (checkpoints, Tabs 1-3, WD totals) stays at the 5-month Jan-May scope.
+# June is a partial month (MTD through 6/16, both years).
+MONTHS_DS = [1, 2, 3, 4, 5, 6]
 
 WORKING_DAYS = {
     (1, 2025): 19.0,

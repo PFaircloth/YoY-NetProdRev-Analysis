@@ -36,6 +36,33 @@ def load_source_data():
     return _source_cache
 
 
+_source_cache_ds = None
+
+
+def load_source_data_ds():
+    """Source rows for the Data Summary window (config.MONTHS_DS), kept separate
+    from load_source_data() so the rest of the model — checkpoints, Tabs 1-3,
+    provider qualification — stays on the Jan-May config.MONTHS scope. Only the
+    Data Summary metric arrays use this wider (June MTD) window."""
+    global _source_cache_ds
+    if _source_cache_ds is not None:
+        return _source_cache_ds
+
+    df = pd.read_excel(config.SOURCE_FILE, sheet_name="NetProdRev_byOffice")
+    df["month_num"] = pd.to_datetime(df["Month"]).dt.month
+    df["year_num"] = df["Year"].astype(int)
+
+    mask = df["month_num"].isin(config.MONTHS_DS) & df["year_num"].isin(
+        [config.YEAR_1, config.YEAR_2]
+    )
+    df = df[mask].copy()
+
+    summary_df = df[df["ROW_CLASS"] == "SUMMARY"].copy()
+    detail_df = df[df["ROW_CLASS"] == "DETAIL"].copy()
+    _source_cache_ds = (summary_df, detail_df)
+    return _source_cache_ds
+
+
 def load_provider_map():
     global _pmap_cache
     if _pmap_cache is not None:
@@ -263,7 +290,7 @@ def build_office_data():
     return result
 
 
-def _ds_metrics(rows):
+def _ds_metrics(rows, months=None):
     """Build the Data Summary 7-metric structure for one entity (office or
     provider), split by year. Monthly values are INDIVIDUAL-month actuals (not
     YTD-cumulative). Each metric array is length 6: the 5 months + YTD Total.
@@ -272,10 +299,12 @@ def _ds_metrics(rows):
     Ratio metrics (spv, vdd, rpd) → YTD is recomputed from the YTD totals, the
     correct production-weighted figure (summing monthly ratios is meaningless).
     """
+    if months is None:
+        months = config.MONTHS
     def per_year(year):
         yr = rows[rows["year_num"] == year]
         npv, vv, ddv, npcv, spvv, vddv, rpdv = [], [], [], [], [], [], []
-        for m in config.MONTHS:
+        for m in months:
             mr = yr[yr["month_num"] == m]
             np_  = _safe(mr["NET PRODUCTION"].sum()) or 0.0
             v_   = _safe(mr["VISITS"].sum()) or 0.0
@@ -288,7 +317,7 @@ def _ds_metrics(rows):
             rpdv.append(np_ / wd  if wd       else None)
 
         np_t  = sum(npv);  v_t = sum(vv);  dd_t = sum(ddv);  npc_t = sum(npcv)
-        wd_t  = sum(config.WORKING_DAYS.get((m, year), 0.0) for m in config.MONTHS)
+        wd_t  = sum(config.WORKING_DAYS.get((m, year), 0.0) for m in months)
         return {
             "np":     npv  + [np_t],
             "visits": vv   + [v_t],
@@ -305,8 +334,13 @@ def build_data_summary():
     """Per-office and per-named-provider monthly actuals — the 'show your work'
     source-data view (Data Summary tab). Office totals from SUMMARY rows,
     provider breakdown from DETAIL rows, named providers via the same 90%/2%
-    qualifying filter as the Provider Deep Dive tab."""
-    summary_df, detail_df = load_source_data()
+    qualifying filter as the Provider Deep Dive tab.
+
+    Provider qualification uses the Jan-May window (load_source_data) so the
+    roster matches the Deep Dive tab exactly; the displayed metric arrays use the
+    wider Data Summary window (load_source_data_ds) so a June MTD column appears."""
+    _, detail_qual = load_source_data()            # Jan-May — qualification only
+    summary_df, detail_df = load_source_data_ds()  # config.MONTHS_DS — displayed metrics
     result = []
 
     for od in config.OFFICE_LIST:
@@ -315,14 +349,14 @@ def build_data_summary():
         prows_all = detail_df[detail_df["OFFICE"] == oname]
 
         providers = []
-        for pname in get_qualifying_providers(prows_all):
+        for pname in get_qualifying_providers(detail_qual[detail_qual["OFFICE"] == oname]):
             prows = prows_all[prows_all["PROVIDER"] == pname]
-            providers.append({"name": pname, "metrics": _ds_metrics(prows)})
+            providers.append({"name": pname, "metrics": _ds_metrics(prows, config.MONTHS_DS)})
 
         result.append({
             "office":    oname,
             "state":     od["state"],
-            "metrics":   _ds_metrics(orows),
+            "metrics":   _ds_metrics(orows, config.MONTHS_DS),
             "providers": providers,
         })
 
