@@ -61,6 +61,21 @@ Recommend dedicated project sprint.
   (commit b4e6cf0): month handling is fully elastic — active months derived from the
   data (year-intersection), all four tabs flex to N months, partial month flagged as
   "<Mon> (MTD)" via `config.MTD_MONTH`, June working-days added so Rev/Day is exact.
+- **Load-time input validation** — the source export has repeatedly proven unstable;
+  build a validation/normalization pass that fails loud (or auto-corrects + logs) on
+  load instead of silently producing wrong numbers. Running evidence the export isn't
+  trustworthy:
+  - **ROW_CLASS casing drift** (fixed commit b02b0cb): June 2026 detail rows arrived as
+    `"Detail"` instead of `"DETAIL"`; the case-sensitive filter silently dropped them, so
+    provider-grain June rendered $0 in Data Summary while office totals (SUMMARY) looked
+    fine. Now normalized via `.str.strip().str.upper()` in `load_source_data`. A validator
+    should assert ROW_CLASS ∈ {SUMMARY, DETAIL} (post-normalize) and flag stray values.
+  - **Duplicate SUMMARY rows** — office-level rows have appeared duplicated; validator
+    should assert one SUMMARY row per office/month/year.
+  - **July–Dec partial/inconsistent data** — later months arrive incomplete or only in
+    one year; currently handled by the year-intersection month window, but a validator
+    should surface per-month/per-year row-count gaps explicitly rather than letting them
+    vanish silently.
 - SharePoint/email distribution pipeline
 - Azure Static Web Apps hosting
 - Monthly automated refresh — drop in new source file, run one command
