@@ -49,8 +49,12 @@ def load_source_data():
     )
     df = df[mask].copy()
 
-    summary_df = df[df["ROW_CLASS"] == "SUMMARY"].copy()
-    detail_df = df[df["ROW_CLASS"] == "DETAIL"].copy()
+    # Normalize ROW_CLASS before filtering: the upstream export has proven
+    # casing drift (June detail rows arrived as "Detail" not "DETAIL"); strip
+    # + upper makes us robust to both casing and stray-whitespace drift.
+    row_class = df["ROW_CLASS"].astype(str).str.strip().str.upper()
+    summary_df = df[row_class == "SUMMARY"].copy()
+    detail_df = df[row_class == "DETAIL"].copy()
     _source_cache = (summary_df, detail_df)
     return _source_cache
 
