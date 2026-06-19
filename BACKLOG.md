@@ -80,6 +80,29 @@ Recommend dedicated project sprint.
   of how those negatives render there (e.g. whether a −$57k "production" reads sensibly in
   YoY Δ and YTD gap). Observation only.
 
+- **Material contributors declined MORE than the company overall (observation, not a task).**
+  The Mix Shift visits anchor is scoped to the rendered 360 material contributors and shows
+  **216,107 → 188,400 visits (−12.8%)**. The all-provider company total (Office Analysis /
+  consolidated population, which ties to the $7.6M) fell **247,561 → 221,488 (−10.5%)**. So
+  the **core/material providers lost proportionally more volume than the company as a whole**
+  — the visit decline is concentrated in material contributors, not the long tail. Each tab's
+  anchor matches its own population by design (don't cross them); this gap is a real signal
+  worth a look, not a reconciliation error. Observation only.
+
+- **Mix source June 2025 is FULL-month, not truncated like File A — Volume uses Jan–May matched (presentation fix in place; source fix outstanding).**
+  The DAX procedure-mix extract returns a **full** June 2025 (rendered-360 visits ≈ 36,707,
+  like May) but a **partial** June 2026 MTD (≈ 21,748). File A (revenue tabs) truncates the
+  prior-year June to the matched ~10.8-working-day window (≈ 24,665 vs 22,621), so the rest of
+  the report is apples-to-apples; the **mix source is not**. Comparing full-June-2025 vs
+  partial-June-2026 overstated the Mix decline (anchor was −12.8% Jan–Jun vs the true
+  **−7.1% Jan–May matched**; company Filling went from a spurious −6.0% to a true +0.2%).
+  **Presentation fix shipped:** Mix Shift Volume columns + visits anchor now use the **Jan–May
+  matched window** (full months, both years) and show June separately as an MTD partial; per-100
+  (Mix) stays Jan–Jun (window-invariant). **Outstanding:** the proper long-term fix is upstream —
+  truncate June 2025 in the DAX extract to the matched MTD window so the full Jan–Jun can be
+  compared. Until then, Jan–May-matched is the correct presentation. Each tab labels its own
+  window explicitly; don't read Volume (Jan–May) and Mix (Jan–Jun) as the same period.
+
 - **Consolidated lever view — operating-offices-only vs Other/wind-down split (not built).**
   The "MDP — Consolidated" company row (Office Analysis tab) ties to the KPI cards by
   consolidating 76 named **+ the "Other" rollup** (= the full $7.6M decline). But "Other"
