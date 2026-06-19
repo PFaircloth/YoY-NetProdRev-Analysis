@@ -127,17 +127,37 @@ def _t2_options(office_data):
 
 # ── HTML generation ───────────────────────────────────────────────────────────
 
-def generate_html(office_data, provider_data, data_summary):
+def generate_html(office_data, provider_data, data_summary, mix_dataset=None, consolidated=None):
     D, OTHER = _transform_offices(office_data)
     PD       = _transform_providers(provider_data)
     DS       = _transform_data_summary(data_summary, provider_data)
+
+    # Synthetic pinned company-total row (same JS shape as a D office; not in D so it is
+    # excluded from sorting/filtering and the KPI sum, which already total 76 + Other).
+    CONS = None
+    if consolidated is not None:
+        CONS = {
+            "office":         consolidated["name"],
+            "state":          consolidated["state"],
+            "isOther":        False,
+            "isConsolidated": True,
+            "sortDelta":      consolidated["checkpoints"][-1]["drd"],
+            "checkpoints":    [_tcp(cp) for cp in consolidated["checkpoints"]],
+        }
 
     D_json     = json.dumps(D,     ensure_ascii=False, separators=(",", ":"))
     OTHER_json = json.dumps(OTHER, ensure_ascii=False, separators=(",", ":"))
     PD_json    = json.dumps(PD,    ensure_ascii=False, separators=(",", ":"))
     DS_json    = json.dumps(DS,    ensure_ascii=False, separators=(",", ":"))
+    MIX_json   = json.dumps(mix_dataset or {}, ensure_ascii=False, separators=(",", ":"))
+    CONS_json  = json.dumps(CONS, ensure_ascii=False, separators=(",", ":"))
 
     t2_opts = _t2_options(office_data)
+
+    # Live rendered-provider count (single source of truth) — PD holds only named
+    # providers (the "Other" rollup is carried separately), so this is exactly the
+    # qualified rendered set the Mix Shift band counts. Never hardcode it.
+    n_prov = sum(len(od["providers"]) for od in PD)
 
     # ── Month metadata: single source of truth, derived from the data ─────────
     months = pipeline.get_active_months()
@@ -159,7 +179,10 @@ def generate_html(office_data, provider_data, data_summary):
     html = html.replace("__OTHER_DATA__", OTHER_json)
     html = html.replace("__PD_DATA__",    PD_json)
     html = html.replace("__DS_DATA__",    DS_json)
+    html = html.replace("__MIX_DATA__",   MIX_json)
+    html = html.replace("__CONSOLIDATED_DATA__", CONS_json)
     html = html.replace("__T2_OPTIONS__", t2_opts)
+    html = html.replace("__NPROV__",      str(n_prov))
     html = html.replace("__WD25__",       str(wd_y1))
     html = html.replace("__WD26__",       str(wd_y2))
     html = html.replace("__MO_LABELS__",  json.dumps(labels, ensure_ascii=False))
@@ -168,6 +191,8 @@ def generate_html(office_data, provider_data, data_summary):
     html = html.replace("__MTD_LABEL__",  json.dumps(mtd_label, ensure_ascii=False))
     html = html.replace("__MTD_ACTIVE__", "true" if mtd_active else "false")
     html = html.replace("__MTD_HINT__",   mtd_hint)
+    html = html.replace("__MO_FIRST__",   pipeline.MONTH_LABELS[months[0]])
+    html = html.replace("__MO_LAST__",    pipeline.MONTH_LABELS[months[-1]])
     return html
 
 
@@ -361,6 +386,54 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   .kpis.k4{grid-template-columns:repeat(2,1fr)}
   .drill-grid{grid-template-columns:repeat(2,1fr)}
 }
+/* Tab 5 — Mix Shift (procedure composition per 100 visits; layout from mock, palette from dashboard) */
+#tab5{--t5-navy:#1F3864;--t5-line:#e2e8f0;--t5-ink:#1f2a44;--t5-soft:#5a6b85;--t5-faint:#94a3b8;
+  --t5-zebra:#f5f8fc;--t5-up:#1a7a4a;--t5-up-bg:#e6f4ec;--t5-down:#C0392B;--t5-down-bg:#fbecea;--t5-accent:#2E4D8A}
+#tab5 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+#tab5 .t5intro{font-size:11px;color:var(--t5-faint);font-style:italic;margin:2px 2px 14px}
+#tab5 .t5intro b{color:var(--t5-soft);font-style:normal}
+#tab5 .t5band{background:var(--t5-navy);color:#fff;padding:10px 16px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;gap:12px}
+#tab5 .t5band .who{font-weight:650;font-size:14px}
+#tab5 .t5band .who small{font-weight:400;color:#c4d2e8;margin-left:8px;font-size:11px}
+#tab5 .t5band .note{font-size:10px;color:#aebfd8;text-align:right}
+#tab5 .t5note{background:#fff8e1;border:0.5px solid #f0d68a;border-top:none;color:#8a6d3b;font-size:11px;font-weight:500;padding:7px 13px}
+#tab5 .t5note .t5inactive{font-style:italic;color:var(--t5-down);font-weight:700}
+#tab5 table.t5tbl{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:0.5px solid var(--t5-line);border-top:none;border-radius:0 0 8px 8px;overflow:hidden}
+#tab5 table.t5tbl th,#tab5 table.t5tbl td{padding:8px 13px;text-align:right;border-bottom:0.5px solid var(--t5-line)}
+#tab5 table.t5tbl thead th{background:var(--t5-navy);color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+#tab5 table.t5tbl thead th.lab{text-align:left}
+#tab5 table.t5tbl td.proc{text-align:left;font-weight:650;color:var(--t5-navy)}
+#tab5 table.t5tbl th.dc,#tab5 table.t5tbl td.dc{background:rgba(46,77,138,.06)}
+#tab5 table.t5tbl thead th.dc{background:#22406e}
+#tab5 tr.t5prov{cursor:pointer}
+#tab5 tr.t5prov:hover td{background:var(--t5-zebra)}
+#tab5 td.proc .tw{display:inline-block;width:15px;color:var(--t5-accent)}
+#tab5 .t5delta{font-weight:700}
+#tab5 .t5up{color:var(--t5-up)}#tab5 .t5down{color:var(--t5-down)}
+#tab5 .t5vs{font-size:11px;color:var(--t5-faint)}
+#tab5 .t5muted{color:var(--t5-faint)}
+#tab5 .t5chip{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 6px;border-radius:4px;margin-left:6px;text-transform:uppercase}
+#tab5 .t5chip.hi{background:var(--t5-up-bg);color:var(--t5-up)}
+#tab5 .t5chip.lo{background:var(--t5-down-bg);color:var(--t5-down)}
+#tab5 .t5chip.in{background:#eef2f6;color:var(--t5-faint)}
+#tab5 tr.t5detail td{padding:0;background:#fbfcfe}
+#tab5 .t5dwrap{padding:8px 14px 16px}
+#tab5 .t5dh{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--t5-soft);padding:8px 2px 6px;font-weight:600}
+#tab5 table.t5mo{width:100%;border-collapse:collapse;font-size:11px}
+#tab5 table.t5mo th,#tab5 table.t5mo td{padding:6px 10px;text-align:right;border-bottom:0.5px solid var(--t5-line)}
+#tab5 table.t5mo th{background:#f0f4f9;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--t5-soft);font-weight:600}
+#tab5 table.t5mo th.l,#tab5 table.t5mo td.l{text-align:left}
+#tab5 table.t5mo td.l{font-weight:600;color:var(--t5-ink)}
+#tab5 tr.t5y26 td{background:#eef3fa}
+#tab5 tr.t5bm td{color:var(--t5-soft)}
+#tab5 tr.t5bm td.l{color:var(--t5-faint);font-style:italic;font-weight:500}
+#tab5 tr.t5sep td{border-top:2px solid #d7e2f0}
+#tab5 .t5prompt{padding:40px 24px;text-align:center;color:#888}
+#tab5 .t5prompt .ic{font-size:32px;margin-bottom:10px}
+#tab5 .t5legend{font-size:11px;color:var(--t5-faint);margin:14px 2px 0;display:flex;gap:20px;flex-wrap:wrap}
+#tab5 .t5legend b{color:var(--t5-soft)}
+#tab5 tr.t5prov:focus-visible{outline:2px solid var(--t5-accent);outline-offset:-2px}
+@media(max-width:880px){#tab5 .t5band{flex-direction:column;align-items:flex-start;gap:4px}#tab5 .t5band .note{text-align:left}#tab5 table.t5tbl,#tab5 .t5dwrap{display:block;overflow-x:auto}}
 </style>
 </head>
 <body>
@@ -368,7 +441,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 
 <div class="header">
   <h1>Revenue Driver Analysis &mdash; __RANGE__</h1>
-  <p>Rev/Day = $/Visit &times; Visits/Dr Day &times; Dr Days/Day &nbsp;&bull;&nbsp; 76 offices &nbsp;&bull;&nbsp; 359 named providers &nbsp;&bull;&nbsp; Providers filtered to material contributors only: cumulative 90% of office production + 2% individual floor (ranked by peak year production &mdash; captures new providers) &nbsp;&bull;&nbsp; Noise providers (temp, insurance, unassigned, etc.) excluded</p>
+  <p>Rev/Day = $/Visit &times; Visits/Dr Day &times; Dr Days/Day &nbsp;&bull;&nbsp; 76 offices &nbsp;&bull;&nbsp; __NPROV__ named providers &nbsp;&bull;&nbsp; Providers filtered to material contributors only: cumulative 90% of office production + 2% individual floor (ranked by peak year production &mdash; captures new providers) &nbsp;&bull;&nbsp; Noise providers (temp, insurance, unassigned, etc.) excluded</p>
 </div>
 
 <!-- TOP NAV TABS -->
@@ -377,6 +450,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
   <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Doctor Rank View</button>
   <button class="nav-tab" id="navTab4" onclick="switchTab(4)">&#128203; Data Summary</button>
+  <button class="nav-tab" id="navTab5" onclick="switchTab(5)">&#128138; Mix Shift</button>
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -614,6 +688,36 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════
+     TAB 5 — MIX SHIFT
+════════════════════════════════════════════════════ -->
+<div id="tab5" style="display:none">
+  <div class="card">
+    <div class="ctrl-row">
+      <label>State:</label>
+      <select id="t5State">
+        <option value="">All states</option>
+        <option>Alabama</option>
+        <option>Arkansas</option>
+        <option>Florida</option>
+        <option>Kentucky</option>
+        <option>Tennessee</option>
+      </select>
+      <label>Office:</label>
+      <select id="t5Office"></select>
+      <label>Provider:</label>
+      <select id="t5Provider" class="big"></select>
+    </div>
+    <div class="t5intro">Procedure composition shown as <b>per 100 visits</b> (mix, not raw volume).__MTD_HINT__ A procedure shows if it had activity in <b>either</b> year. <b>&Delta; = 2026 &minus; 2025</b> (YoY shift). Click a procedure for its monthly shape.</div>
+    <div id="t5Wrap"></div>
+    <div class="t5legend">
+      <span><b>&Delta;</b> YoY shift in per-100-visits &middot; <span class="t5up">&#9650; up</span> &middot; <span class="t5down">&#9660; down</span></span>
+      <span><b>vs Company</b> rate vs the company average &middot; <span class="t5up">above</span> / <span class="t5down">below</span> / in line</span>
+      <span><b>Click a procedure</b> to expand its monthly shape (__MO_FIRST__&ndash;__MO_LAST__, 2025/2026 with state &amp; company)</span>
+    </div>
+  </div>
+</div>
+
 <div class="footer">Generated from source data &mdash; __RANGE__ &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
 </div>
 
@@ -628,6 +732,7 @@ function mtdBanner(){return MTD_ON?'<div>&#9888; '+MTD_LABEL+' (MTD) is a partia
 
 var D=__D_DATA__;
 var OTHER=__OTHER_DATA__;
+var CONSOLIDATED=__CONSOLIDATED_DATA__;   // company-total pinned row (76 + Other); null if not built
 var PD=__PD_DATA__;
 var PD_MAP={};
 for(var i=0;i<PD.length;i++){PD_MAP[PD[i].office]=PD[i];}
@@ -887,7 +992,28 @@ function renderT1(){
       +'<tr class="drill-wrap" id="d'+okey+'" style="display:none"><td colspan="'+(3+MO.length)+'"><div id="dc'+okey+'"></div></td></tr>';
   }
 
-  document.getElementById('t1Wrap').innerHTML='<table class="hm">'+thead+'<tbody>'+rows+'</tbody></table>';
+  // Pinned company-total row — top of the body, above the first office, not sorted into
+  // it. Shown only in the unfiltered full view (same visibility as the Other row); a
+  // company-wide total above a filtered subset would misread. Excluded from KPI sum (D
+  // + Other already total it) so no double-count.
+  var pinned='';
+  if(res.showOther&&CONSOLIDATED){
+    var rc=CONSOLIDATED,ccells='';
+    for(var jc=0;jc<rc.checkpoints.length;jc++){
+      var vc=metric==='delta'?rc.checkpoints[jc].dRD:rc.checkpoints[jc].pctRD;
+      var extrac=(jc===rc.checkpoints.length-1&&metric==='delta')?trendArrow(rc.checkpoints):'';
+      ccells+='<td style="'+hcol(vc,metric)+'">'+fm(vc,metric)+extrac+'</td>';
+    }
+    var ckey='t1_cons';
+    pinned='<tr class="dr" data-key="'+ckey+'" data-idx="-2" style="background:#eef2fa">'
+      +'<td class="rk" style="color:#1F3864">&#9733;</td>'
+      +'<td class="l" style="font-weight:700;color:#1F3864;border-left:3px solid #1F3864">'+rc.office+' <span class="arrow" id="a'+ckey+'">&#8250;</span></td>'
+      +'<td class="st" style="color:#1F3864;font-weight:600">'+rc.state+'</td>'+ccells
+      +'</tr>'
+      +'<tr class="drill-wrap" id="d'+ckey+'" style="display:none"><td colspan="'+(3+MO.length)+'"><div id="dc'+ckey+'"></div></td></tr>';
+  }
+
+  document.getElementById('t1Wrap').innerHTML='<table class="hm">'+thead+'<tbody>'+pinned+rows+'</tbody></table>';
 
   var trs=document.getElementById('t1Wrap').querySelectorAll('tr.dr');
   var cdata=data;
@@ -896,7 +1022,7 @@ function renderT1(){
       tr.addEventListener('click',function(){
         var key=tr.getAttribute('data-key');
         var idx=parseInt(tr.getAttribute('data-idx'));
-        var r=idx===-1?OTHER:d[idx];
+        var r=idx===-1?OTHER:(idx===-2?CONSOLIDATED:d[idx]);
         togT1(key,r);
       });
     })(trs[k],cdata);
@@ -1408,6 +1534,164 @@ function t4Bind(){
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// TAB 5 — MIX SHIFT (procedure composition per 100 visits; consumes the verified
+// Build-1 mix_dataset payload — benchmarks rendered as-is, nothing locked recomputed)
+// ══════════════════════════════════════════════════════════════════════════════
+var MIX=__MIX_DATA__;
+var MG=(MIX.meta&&MIX.meta.groups)||[];        // 9 procedure groups, canonical order
+var MYT=(MIX.meta&&MIX.meta.active_months.length)||MO.length;  // YTD index in per100/visits arrays
+var T5_INACTIVE_FRAC=0.05;   // 2026 YTD visits below this fraction of 2025 → activity label (tunable)
+
+var MIX_BY_OFFICE={};
+for(var _mi=0;_mi<(MIX.providers||[]).length;_mi++){var _mp=MIX.providers[_mi];(MIX_BY_OFFICE[_mp.office]=MIX_BY_OFFICE[_mp.office]||[]).push(_mp);}
+function t5Prov(office,prov){var l=MIX_BY_OFFICE[office]||[];for(var i=0;i<l.length;i++)if(l[i].provider===prov)return l[i];return null;}
+
+// provider role (General Dentist/Hygienist/…) — carried on PD, not on the mix payload
+var T5_ROLE={};
+for(var _pi=0;_pi<PD.length;_pi++){var _pod=PD[_pi];for(var _pj=0;_pj<_pod.providers.length;_pj++){var _pp=_pod.providers[_pj];(T5_ROLE[_pod.office]=T5_ROLE[_pod.office]||{})[_pp.provider]=_pp.ptype||'';}}
+
+function t5f1(v){return (v==null)?'<span class="t5muted">&mdash;</span>':v.toFixed(1);}
+function t5Delta(cur,prev){
+  if(cur==null||prev==null)return '<span class="t5vs num">&mdash;</span>';
+  var d=cur-prev;
+  if(Math.abs(d)<0.05)return '<span class="t5vs num">&plusmn;0.0</span>';
+  var up=d>=0;
+  return '<span class="t5delta num '+(up?'t5up':'t5down')+'">'+(up?'&#9650;':'&#9660;')+' '+Math.abs(d).toFixed(1)+'</span>';
+}
+// vs-Company flag — threshold from the mock: in line if |Δ| < 25% of company OR < 1.0
+function t5Vs(pv,co){
+  if(pv==null||co==null)return '<span class="t5chip in">&mdash;</span>';
+  var d=pv-co,a=Math.abs(d);
+  if(a<co*0.25||a<1)return '<span class="t5chip in">&asymp; in line</span>';
+  return d>0?'<span class="t5chip hi">&#9650; above co</span>':'<span class="t5chip lo">&#9660; below co</span>';
+}
+// activity status from 2026 vs 2025 YTD visits — visit-based fact, NOT an employment inference
+function t5Status(rec){
+  var v25=rec.visits.y1[MYT],v26=rec.visits.y2[MYT];
+  if(v26===0)return {code:'none',label:'no 2026 activity'};
+  if(v25>0&&v26<T5_INACTIVE_FRAC*v25)return {code:'minimal',label:'minimal 2026 activity ('+v26.toLocaleString()+(v26===1?' visit':' visits')+')'};
+  return {code:'active',label:''};
+}
+// aggregate provider records into a benchmark-shaped object (office-scoped landing only;
+// State & Company come pre-computed from the data layer and are never recomputed here)
+function t5Aggregate(recs){
+  var per100={},visits={y1:[],y2:[]},yk,g;
+  for(var y=0;y<2;y++){yk=y?'y2':'y1';for(var i=0;i<=MYT;i++){var vs=0;for(var r=0;r<recs.length;r++)vs+=recs[r].visits[yk][i];visits[yk][i]=vs;}}
+  for(var gi=0;gi<MG.length;gi++){g=MG[gi];per100[g]={y1:[],y2:[]};
+    for(var y2=0;y2<2;y2++){yk=y2?'y2':'y1';for(var j=0;j<=MYT;j++){var c=0;for(var r2=0;r2<recs.length;r2++)c+=recs[r2].counts[g][yk][j];per100[g][yk][j]=visits[yk][j]>0?(c/visits[yk][j]*100):null;}}
+  }
+  return {per100:per100,visits:visits};
+}
+
+// ① LANDING — consolidated mix for the current scope (company / state / office)
+function t5Landing(){
+  var state=document.getElementById('t5State').value;
+  var office=document.getElementById('t5Office').value;
+  var scope,title,sub;
+  if(office&&office!=='all'){
+    var recs=MIX_BY_OFFICE[office]||[];scope=t5Aggregate(recs);
+    title=office.replace(/&/g,'&amp;');sub=(state||'all states')+' &middot; '+recs.length+' rendered providers';
+  }else if(state){
+    scope=MIX.state_benchmark[state];title=state;sub=(scope?scope.n_providers:0)+' rendered providers';
+  }else{
+    scope=MIX.company_benchmark;title='Company-wide';sub=(scope?scope.n_providers:0)+' rendered providers';
+  }
+  if(!scope)return '<div class="t5prompt"><div class="ic">&#128138;</div><p>No mix data for this scope.</p></div>';
+  var rows='';
+  for(var gi=0;gi<MG.length;gi++){var g=MG[gi];var a=scope.per100[g].y1[MYT],b=scope.per100[g].y2[MYT];
+    rows+='<tr><td class="proc">'+g+'</td><td class="num">'+t5f1(a)+'</td><td class="num">'+t5f1(b)+'</td><td class="dc num">'+t5Delta(b,a)+'</td></tr>';
+  }
+  return '<div class="t5band"><div class="who">'+title+' <small>consolidated procedure mix &middot; material contributors (cum. 90% + 2% floor) &middot; per 100 visits &middot; '+MO[0]+'&ndash;'+MO[MYT-1]+'</small></div><div class="note">'+sub+'<br>select a provider above to drill in</div></div>'
+    +'<table class="t5tbl"><thead><tr><th class="lab">Procedure</th><th>2025</th><th>2026</th><th class="dc">&Delta; YoY</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+// ② COMPACT — the provider's procedures that moved, YoY, vs company
+function t5Compact(office,prov){
+  var rec=t5Prov(office,prov);
+  if(!rec)return '<div class="t5prompt"><p>No mix data for this provider.</p></div>';
+  var st=t5Status(rec),inactive=st.code!=='active';
+  var role=(T5_ROLE[office]||{})[prov]||'';
+  var v25=rec.visits.y1[MYT],v26=rec.visits.y2[MYT];
+  var procs=MG.filter(function(g){return (rec.counts[g].y1[MYT]>0)||(rec.counts[g].y2[MYT]>0);})
+    .map(function(g){var a=rec.per100[g].y1[MYT],b=inactive?null:rec.per100[g].y2[MYT];
+      return {g:g,sort:(a!=null&&b!=null)?Math.abs(b-a):(a!=null?a:(b||0))};})
+    .sort(function(x,y){return y.sort-x.sort;}).map(function(o){return o.g;});
+  var body='';
+  for(var i=0;i<procs.length;i++){var g=procs[i];
+    var a=rec.per100[g].y1[MYT],b=inactive?null:rec.per100[g].y2[MYT],co=MIX.company_benchmark.per100[g].y2[MYT];
+    body+='<tbody>';
+    body+='<tr class="t5prov" data-g="'+t4esc(g)+'" tabindex="0" role="button" aria-expanded="false">'
+      +'<td class="proc"><span class="tw">&#9656;</span>'+g+'</td>'
+      +'<td class="num">'+t5f1(a)+'</td>'
+      +'<td class="num">'+(inactive?'<span class="t5muted">&mdash;</span>':t5f1(b))+'</td>'
+      +'<td class="dc num">'+(inactive?'<span class="t5vs">&mdash;</span>':t5Delta(b,a))+'</td>'
+      +'<td class="num t5vs">'+t5f1(co)+'</td>'
+      +'<td>'+(inactive?'<span class="t5chip in">&mdash;</span>':t5Vs(b,co))+'</td></tr>';
+    body+='<tr class="t5detail" style="display:none"><td colspan="6">'+t5Month(rec,g,st)+'</td></tr>';
+    body+='</tbody>';
+  }
+  var note=inactive?'<div class="t5note">&#9888; <span class="t5inactive">'+st.label+'</span> &mdash; 2026 procedure mix is not shown (a visit-based rate is not meaningful here); showing 2025 mix. Monthly context still available on expand.</div>':'';
+  var band='<div class="t5band"><div class="who">'+prov+' <small>'+office.replace(/&/g,'&amp;')+(rec.state?' &middot; '+rec.state:'')+(role?' &middot; '+role:'')+' &middot; '+v25.toLocaleString()+' visits &rsquo;25 &rarr; '+v26.toLocaleString()+' &rsquo;26'+(MTD_ON?' (MTD)':'')+'</small></div><div class="note">per 100 visits &middot; biggest shift first &middot; click to expand</div></div>';
+  return band+note+'<table class="t5tbl"><thead><tr><th class="lab">Procedure</th><th>2025</th><th>2026</th><th class="dc">&Delta; YoY</th><th>Company &rsquo;26</th><th></th></tr></thead>'+body+'</table>';
+}
+
+// ③ EXPANDED — monthly shape for one procedure: provider / state / company, 2025 & 2026
+function t5Month(rec,g,st){
+  var state=rec.state,sb=MIX.state_benchmark[state],cb=MIX.company_benchmark,inactive=st.code!=='active';
+  function row(cls,lbl,arr,blank){
+    var c='';for(var i=0;i<MYT;i++)c+='<td class="num">'+(blank?'<span class="t5muted">&mdash;</span>':t5f1(arr?arr[i]:null))+'</td>';
+    return '<tr class="'+cls+'"><td class="l">'+lbl+'</td>'+c+'</tr>';
+  }
+  var h='<tr><th class="l">'+g+' &middot; per 100 visits</th>';
+  for(var i=0;i<MYT;i++)h+='<th>'+MO[i]+'</th>';
+  h+='</tr>';
+  var b='';
+  b+=row('t5y25','Provider 2025',rec.per100[g].y1,false);
+  b+=row('t5y26','Provider 2026'+(inactive?' &mdash; '+st.label:''),rec.per100[g].y2,inactive);
+  b+=row('t5bm t5sep','Across '+state+' 2025',sb?sb.per100[g].y1:null,false);
+  b+=row('t5bm','Across '+state+' 2026',sb?sb.per100[g].y2:null,false);
+  b+=row('t5bm t5sep','Across Company 2025',cb.per100[g].y1,false);
+  b+=row('t5bm','Across Company 2026',cb.per100[g].y2,false);
+  return '<div class="t5dwrap"><div class="t5dh">Monthly shape &mdash; '+g+' &middot; 2025 vs 2026, with state &amp; company context</div><table class="t5mo"><thead>'+h+'</thead><tbody>'+b+'</tbody></table></div>';
+}
+
+function t5OfficeOptions(){
+  var state=document.getElementById('t5State').value,sel=document.getElementById('t5Office');
+  var seen={},uniq=[];
+  for(var i=0;i<(MIX.providers||[]).length;i++){var p=MIX.providers[i];if((!state||p.state===state)&&!seen[p.office]){seen[p.office]=1;uniq.push(p.office);}}
+  uniq.sort(function(a,b){return a.localeCompare(b,undefined,{sensitivity:'base'});});
+  var html='<option value="all">All offices (consolidated)</option>';
+  for(var j=0;j<uniq.length;j++)html+='<option value="'+t4esc(uniq[j])+'">'+uniq[j].replace(/&/g,'&amp;')+'</option>';
+  sel.innerHTML=html;sel.value='all';
+}
+function t5ProviderOptions(){
+  var office=document.getElementById('t5Office').value,sel=document.getElementById('t5Provider');
+  var html='<option value="">&mdash; consolidated (no provider) &mdash;</option>';
+  if(office&&office!=='all'){var recs=MIX_BY_OFFICE[office]||[];
+    for(var i=0;i<recs.length;i++)html+='<option value="'+t4esc(recs[i].provider)+'">'+recs[i].provider.replace(/&/g,'&amp;')+'</option>';}
+  sel.innerHTML=html;sel.value='';
+}
+function renderT5(){
+  var office=document.getElementById('t5Office').value,prov=document.getElementById('t5Provider').value,wrap=document.getElementById('t5Wrap');
+  if(prov&&office&&office!=='all'){wrap.innerHTML=t5Compact(office,prov);t5Bind();}
+  else{wrap.innerHTML=t5Landing();}
+}
+function t5Bind(){
+  document.querySelectorAll('#tab5 tr.t5prov').forEach(function(tr){
+    function tog(){
+      var d=tr.parentNode.querySelector('tr.t5detail'),tw=tr.querySelector('.tw');
+      if(!d)return;
+      var open=d.style.display==='none';
+      d.style.display=open?'':'none';
+      if(tw)tw.innerHTML=open?'&#9662;':'&#9656;';
+      tr.setAttribute('aria-expanded',open?'true':'false');
+    }
+    tr.addEventListener('click',tog);
+    tr.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();tog();}});
+  });
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(n){
   currentTab=n;
@@ -1415,10 +1699,12 @@ function switchTab(n){
   document.getElementById('tab2').style.display=n===2?'':'none';
   document.getElementById('tab3').style.display=n===3?'':'none';
   document.getElementById('tab4').style.display=n===4?'':'none';
+  document.getElementById('tab5').style.display=n===5?'':'none';
   document.getElementById('navTab1').className='nav-tab'+(n===1?' on':'');
   document.getElementById('navTab2').className='nav-tab'+(n===2?' on':'');
   document.getElementById('navTab3').className='nav-tab'+(n===3?' on':'');
   document.getElementById('navTab4').className='nav-tab'+(n===4?' on':'');
+  document.getElementById('navTab5').className='nav-tab'+(n===5?' on':'');
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
@@ -1429,12 +1715,18 @@ document.getElementById('t1Search').addEventListener('input',renderT1);
 document.getElementById('t3Search').addEventListener('input',renderT3);
 document.getElementById('t4State').addEventListener('change',function(){t4Reset();t4OfficeOptions();renderT4();});
 document.getElementById('t4Office').addEventListener('change',function(){t4Reset();renderT4();});
+document.getElementById('t5State').addEventListener('change',function(){t5OfficeOptions();t5ProviderOptions();renderT5();});
+document.getElementById('t5Office').addEventListener('change',function(){t5ProviderOptions();renderT5();});
+document.getElementById('t5Provider').addEventListener('change',renderT5);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 renderT1();
 renderT3();
 t4OfficeOptions();
 renderT4();
+t5OfficeOptions();
+t5ProviderOptions();
+renderT5();
 </script>
 </body>
 </html>

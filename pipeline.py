@@ -286,6 +286,35 @@ def build_office_data():
     return result
 
 
+def build_consolidated():
+    """Synthetic company-total 'office' for the Office Analysis tab: sum the RAW totals
+    (Net Production, Visits, Doctor Days, New Patients, working days) across ALL offices
+    per YTD checkpoint, THEN compute ratios — never averaging per-office ratios. This is
+    exactly what _build_checkpoints already does over whatever rows it's given, so passing
+    the full summary_df (every office: the 76 named + the unnamed 'Other' rollup) yields
+    the consolidated company. That set is identical to what the tab's KPI cards sum, so the
+    consolidated Rev/Day ties to them ($696,511 → $629,271). Lever decomposition is the
+    same per-office logic. Additive: does not touch build_office_data or the 76 rows."""
+    summary_df, _ = load_source_data()
+    cps = _build_checkpoints(
+        summary_df[summary_df["year_num"] == config.YEAR_1],
+        summary_df[summary_df["year_num"] == config.YEAR_2],
+        include_levers=True,
+    )
+    trend, baseline_month = _compute_trend(cps)
+    return {
+        "name": "MDP — Consolidated",
+        "state": "Company",
+        "rank": None,
+        "is_other": False,
+        "is_consolidated": True,
+        "is_future_start": False,
+        "checkpoints": cps,
+        "trend": trend,
+        "trend_base": baseline_month,
+    }
+
+
 def _ds_metrics(rows, months=None):
     """Build the Data Summary 7-metric structure for one entity (office or
     provider), split by year. Monthly values are INDIVIDUAL-month actuals (not

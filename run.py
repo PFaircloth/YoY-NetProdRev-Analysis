@@ -3,7 +3,8 @@ import os
 from datetime import datetime
 
 import config
-from pipeline import build_office_data, build_provider_data, build_data_summary
+from pipeline import build_office_data, build_provider_data, build_data_summary, build_consolidated
+from mix_pipeline import build_mix_dataset
 from report import generate_html
 
 _OUTPUT_DIR = os.path.dirname(config.OUTPUT_FILE)
@@ -33,6 +34,8 @@ def main():
     office_data   = build_office_data()
     provider_data = build_provider_data()
     data_summary  = build_data_summary()
+    mix_dataset   = build_mix_dataset()[0]   # verified Build-1 mix data layer (consume only)
+    consolidated  = build_consolidated()     # company-total pinned row (ties to KPI cards)
 
     named_offices   = [o for o in office_data if not o["is_other"]]
     total_providers = sum(
@@ -40,9 +43,15 @@ def main():
         for od in provider_data
     )
     print(f"  {len(named_offices)} offices · {total_providers} named providers")
+    print(f"  Mix Shift: {len(mix_dataset['providers'])} providers · "
+          f"{len(mix_dataset['meta']['groups'])} procedure groups")
+
+    cons_fin = consolidated["checkpoints"][-1]
+    print(f"  Consolidated Rev/Day: {cons_fin['rd25']:,.0f} → {cons_fin['rd26']:,.0f} "
+          f"(Δ {cons_fin['drd']:,.0f})")
 
     print("Generating HTML report…")
-    html = generate_html(office_data, provider_data, data_summary)
+    html = generate_html(office_data, provider_data, data_summary, mix_dataset, consolidated)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)

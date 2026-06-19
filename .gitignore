@@ -4,3 +4,9 @@ __pycache__/
 
 # Generated reports (built by `python3 run.py`)
 output/
+
+# Data extracts & backups — volatile/large, not version-controlled.
+# Covers the canonical X. DAX_ProcedureMix.xlsx, the W re-pull, and *.pre_*.bak
+# promotion backups. (A. and B. were tracked before this rule and stay tracked.)
+data/*.xlsx
+data/*.bak

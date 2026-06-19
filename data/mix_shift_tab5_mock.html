@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mix Shift — Tab 5 Mock v2</title>
+<style>
+  :root{--navy:#1e3a5f;--navy-deep:#16284a;--band:#2b4a7f;--bg:#eef1f5;--card:#fff;--line:#e2e8f0;
+  --ink:#1f2a44;--ink-soft:#5a6b85;--ink-faint:#94a3b8;--zebra:#f5f8fc;
+  --up:#137a48;--up-bg:#e6f4ec;--down:#c0392b;--down-bg:#fbecea;--accent:#2563b0;--radius:10px;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45}
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 20px 90px}
+  .up{color:var(--up)}.down{color:var(--down)}
+  .hero{background:linear-gradient(135deg,var(--navy-deep),var(--band));color:#fff;border-radius:var(--radius);padding:16px 22px;margin-bottom:14px}
+  .hero h1{margin:0 0 5px;font-size:20px;font-weight:650}.hero p{margin:0;font-size:12px;color:#cdd9ec;max-width:900px}
+  .mb{display:inline-block;margin-top:9px;font-size:11px;font-weight:600;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.3);color:#eaf1fb;padding:3px 9px;border-radius:999px}
+  .tabs{display:flex;gap:7px;margin-bottom:14px}
+  .tab{flex:1;text-align:center;padding:11px 6px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-weight:600;color:var(--ink-soft);font-size:13px}
+  .tab.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .filters{display:flex;gap:20px;align-items:center;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:10px}
+  .filters label{font-size:13px;color:var(--ink-soft);margin-right:7px}
+  .filters select{font:inherit;padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:var(--ink)}
+  .intro{font-size:12px;color:var(--ink-faint);font-style:italic;margin:2px 2px 14px}.intro b{color:var(--ink-soft);font-style:normal}
+  .stagelbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);margin:22px 2px 7px}
+  .band{background:linear-gradient(135deg,var(--navy-deep),var(--band));color:#fff;padding:10px 16px;border-radius:var(--radius) var(--radius) 0 0;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .band .who{font-weight:650;font-size:15px}.band .who small{font-weight:400;color:#c4d2e8;margin-left:8px;font-size:12px}
+  .band .note{font-size:11px;color:#aebfd8}
+  table.t{width:100%;border-collapse:collapse;font-size:13px;background:var(--card);border:1px solid var(--line);border-top:none;border-radius:0 0 var(--radius) var(--radius);overflow:hidden}
+  table.t th,table.t td{padding:8px 13px;text-align:right;border-bottom:1px solid var(--line)}
+  table.t thead th{background:var(--navy);color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+  table.t thead th.lab{text-align:left}
+  td.proc{text-align:left;font-weight:650;color:var(--navy)}
+  th.d,td.d{background:rgba(37,99,176,.06)}thead th.d{background:#22406e}
+  tr.prov{cursor:pointer}tr.prov:hover td{background:var(--zebra)}
+  td.proc .tw{display:inline-block;width:15px;color:var(--accent)}
+  .delta{font-weight:700}
+  .chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.3px;padding:1px 6px;border-radius:4px;margin-left:6px;text-transform:uppercase}
+  .chip.hi{background:var(--up-bg);color:var(--up)}.chip.lo{background:var(--down-bg);color:var(--down)}.chip.in{background:#eef2f6;color:var(--ink-faint)}
+  .vs{font-size:12px;color:var(--ink-faint)}
+  tr.detail td{padding:0;background:#fbfcfe}
+  .dwrap{padding:8px 14px 16px}
+  .dh{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink-soft);padding:8px 2px 6px;font-weight:600}
+  table.mo{width:100%;border-collapse:collapse;font-size:12px}
+  table.mo th,table.mo td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)}
+  table.mo th{background:#f0f4f9;font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--ink-soft);font-weight:600}
+  table.mo th.l,table.mo td.l{text-align:left}
+  table.mo td.l{font-weight:600}
+  tr.y26 td{background:#eef3fa}
+  tr.bm td{color:var(--ink-soft)}tr.bm td.l{color:var(--ink-faint);font-style:italic;font-weight:500}
+  tr.sep td{border-top:2px solid #d7e2f0}
+  .legend{font-size:11.5px;color:var(--ink-faint);margin:14px 2px 0;display:flex;gap:20px;flex-wrap:wrap}.legend b{color:var(--ink-soft)}
+  @media(max-width:860px){.tabs{display:none}}
+</style></head><body><div class="wrap">
+  <div class="hero"><h1>Revenue Driver Analysis — Jan 1 – June 16 · 2025 vs 2026</h1>
+  <p>Mix Shift — each provider’s procedure composition per 100 visits, period over period, against state and company, to explain why revenue moved.</p>
+  <span class="mb">Tab 5 mock v2 · progressive disclosure · real numbers (Trevor Parker · Dothan Smiles · AL) · Jun = MTD</span></div>
+  <div class="tabs"><div class="tab">Office Analysis</div><div class="tab">Provider Deep Dive</div><div class="tab">Doctor Rank View</div><div class="tab">Data Summary</div><div class="tab active">Mix Shift</div></div>
+  <div class="filters"><div><label>State</label><select><option>All states</option><option selected>Alabama</option></select></div>
+  <div><label>Office</label><select><option selected>Dothan Smiles</option></select></div>
+  <div><label>Provider</label><select id="psel"><option value="none">— select a provider —</option><option value="p" selected>Trevor Parker</option></select></div></div>
+  <div class="intro">Procedures shown as <b>per 100 visits</b> (mix, not raw volume). <b>Jun (MTD)</b> through 6/16; 2025 matched to the same window. A procedure shows if it had activity in <b>either</b> year. <b>Δ = 2026 − 2025</b> (YoY shift). Click a procedure for the monthly shape.</div>
+
+  <div class="stagelbl">① Landing — before any provider is selected (consolidated company mix)</div>
+  <div id="landing"></div>
+
+  <div class="stagelbl">② Provider selected — compact: procedures that moved, YoY, vs company</div>
+  <div id="compact"></div>
+
+  <div class="legend">
+    <span><b>Δ</b> YoY shift in per-100-visits · <span class="up">▲ up</span> · <span class="down">▼ down</span></span>
+    <span><b>vs Company</b> how their rate compares to the company average · <span class="up">above</span> / <span class="down">below</span> / in line</span>
+    <span><b>Click a procedure</b> to expand its monthly shape (Jan–Jun, 2025/2026 stacked, with State &amp; Company)</span>
+  </div>
+</div>
+<script>
+const D = {"G": ["Crown", "Filling", "Endo", "Ortho", "Extraction", "Implant", "Bone Graft", "Denture", "Bridge"], "MO": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"], "prov": {"2025": {"Crown": [26.1, 26.5, 35.7, 25.7, 34.3, 36.1], "Filling": [21.3, 47.7, 30.8, 28.6, 21.3, 57.0], "Endo": [10.5, 10.0, 8.3, 4.5, 7.1, 9.8], "Ortho": [0.3, 0.0, 0.0, 0.0, 0.0, 0.0], "Extraction": [3.7, 5.7, 5.5, 15.7, 28.4, 11.5], "Implant": [0.3, 1.9, 1.2, 1.2, 4.3, 8.9], "Bone Graft": [0.3, 0.2, 0.3, 0.4, 0.6, 0.0], "Denture": [4.3, 3.1, 4.9, 8.2, 2.5, 2.6], "Bridge": [12.8, 13.6, 13.5, 9.4, 12.7, 11.1], "_agg": {"Crown": 30.1, "Filling": 34.2, "Endo": 8.2, "Ortho": 0.0, "Extraction": 11.7, "Implant": 2.7, "Bone Graft": 0.3, "Denture": 4.5, "Bridge": 12.1}, "_visits": [352, 419, 325, 490, 324, 305]}, "2026": {"Crown": [26.2, 22.7, 29.5, 27.9, 31.5, 20.2], "Filling": [88.4, 61.3, 78.7, 56.7, 39.0, 20.7], "Endo": [9.0, 15.7, 8.6, 11.5, 3.8, 4.0], "Ortho": [0.0, 0.0, 0.0, 0.0, 0.0, 0.5], "Extraction": [7.1, 9.7, 14.6, 5.8, 7.5, 3.5], "Implant": [1.1, 1.0, 1.1, 1.6, 1.9, 3.0], "Bone Graft": [0.4, 0.3, 1.9, 0.6, 1.4, 0.0], "Denture": [3.7, 5.0, 7.5, 5.4, 4.7, 2.5], "Bridge": [9.7, 7.3, 6.7, 12.2, 4.7, 14.6], "_agg": {"Crown": 26.4, "Filling": 59.8, "Endo": 9.4, "Ortho": 0.1, "Extraction": 8.2, "Implant": 1.5, "Bone Graft": 0.8, "Denture": 4.9, "Bridge": 9.2}, "_visits": [267, 300, 268, 312, 213, 198]}}, "state": {"2025": {"Crown": [6.8, 7.0, 6.6, 7.2, 7.5, 7.1], "Filling": [16.8, 19.6, 19.1, 19.1, 21.2, 19.0], "Endo": [1.4, 1.7, 1.3, 1.1, 1.5, 1.6], "Ortho": [0.3, 0.1, 0.1, 0.1, 0.2, 0.1], "Extraction": [11.6, 11.6, 11.3, 10.1, 10.9, 11.1], "Implant": [0.3, 0.5, 0.2, 0.3, 0.4, 0.6], "Bone Graft": [1.1, 1.1, 1.2, 0.7, 0.6, 0.7], "Denture": [2.2, 1.9, 2.1, 2.1, 2.2, 2.3], "Bridge": [2.7, 3.2, 2.8, 2.3, 2.2, 2.7], "_agg": {"Crown": 7.0, "Filling": 19.1, "Endo": 1.4, "Ortho": 0.1, "Extraction": 11.1, "Implant": 0.4, "Bone Graft": 0.9, "Denture": 2.1, "Bridge": 2.6}, "_visits": [8821, 9014, 9526, 10678, 9002, 9344]}, "2026": {"Crown": [7.1, 7.4, 7.5, 7.0, 6.8, 6.0], "Filling": [23.3, 22.9, 24.4, 22.2, 21.0, 20.0], "Endo": [1.3, 1.8, 1.2, 1.4, 1.1, 1.0], "Ortho": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1], "Extraction": [10.9, 11.1, 11.7, 11.0, 10.5, 12.1], "Implant": [0.2, 0.3, 0.4, 0.4, 0.3, 0.4], "Bone Graft": [0.7, 0.9, 0.5, 0.9, 0.5, 1.0], "Denture": [2.3, 1.9, 1.9, 1.8, 1.8, 1.6], "Bridge": [3.1, 2.6, 2.5, 2.4, 2.4, 2.5], "_agg": {"Crown": 7.0, "Filling": 22.5, "Endo": 1.3, "Ortho": 0.1, "Extraction": 11.2, "Implant": 0.3, "Bone Graft": 0.7, "Denture": 1.9, "Bridge": 2.6}, "_visits": [8285, 8283, 9247, 9376, 7701, 5418]}}, "comp": {"2025": {"Crown": [7.2, 7.2, 7.0, 7.5, 7.9, 7.1], "Filling": [14.9, 15.7, 15.9, 15.6, 16.6, 15.5], "Endo": [1.8, 2.1, 1.9, 1.9, 2.1, 2.0], "Ortho": [0.5, 0.5, 0.5, 0.5, 0.3, 0.4], "Extraction": [8.6, 8.8, 9.3, 8.8, 9.9, 9.8], "Implant": [1.3, 1.2, 1.3, 1.4, 1.3, 1.3], "Bone Graft": [2.4, 2.5, 2.9, 2.6, 2.7, 2.9], "Denture": [2.3, 2.0, 2.0, 2.0, 2.1, 2.2], "Bridge": [2.3, 2.3, 2.3, 2.4, 2.1, 2.3], "_agg": {"Crown": 7.3, "Filling": 15.7, "Endo": 2.0, "Ortho": 0.5, "Extraction": 9.2, "Implant": 1.3, "Bone Graft": 2.7, "Denture": 2.1, "Bridge": 2.3}, "_visits": [34846, 34025, 36692, 38514, 34813, 36597]}, "2026": {"Crown": [7.5, 7.1, 7.1, 6.9, 7.4, 6.4], "Filling": [16.5, 17.1, 17.4, 17.2, 16.3, 16.3], "Endo": [1.7, 2.0, 1.9, 1.9, 1.8, 1.7], "Ortho": [0.4, 0.4, 0.4, 0.4, 0.4, 0.3], "Extraction": [8.8, 8.4, 9.4, 8.6, 8.9, 8.3], "Implant": [1.2, 1.2, 1.4, 1.3, 1.2, 1.1], "Bone Graft": [2.5, 2.5, 2.6, 2.6, 2.6, 2.4], "Denture": [2.1, 2.0, 1.8, 1.9, 1.7, 1.7], "Bridge": [2.4, 2.2, 2.0, 2.0, 1.9, 1.8], "_agg": {"Crown": 7.1, "Filling": 16.9, "Endo": 1.8, "Ortho": 0.4, "Extraction": 8.8, "Implant": 1.3, "Bone Graft": 2.6, "Denture": 1.9, "Bridge": 2.1}, "_visits": [32736, 33940, 36146, 34458, 29309, 20110]}}};
+const MO=D.MO;
+function f1(v){return v.toFixed(1);}
+function dchip(cur,prev){const d=cur-prev;if(Math.abs(d)<0.05)return '<span class="vs num">±0.0</span>';const up=d>=0;return '<span class="delta num '+(up?"up":"down")+'">'+(up?"▲":"▼")+" "+Math.abs(d).toFixed(1)+'</span>';}
+function vsChip(pv,co){const d=pv-co;const a=Math.abs(d);if(a<co*0.25||a<1)return '<span class="chip in">≈ in line</span>';return d>0?'<span class="chip hi">▲ above co</span>':'<span class="chip lo">▼ below co</span>';}
+
+// LANDING: company mix, all 9 procedures, 2025 vs 2026
+function landing(){
+  let rows='';
+  D.G.forEach(g=>{const a=D.comp["2025"]._agg[g],b=D.comp["2026"]._agg[g];
+    rows+='<tr><td class="proc">'+g+'</td><td class="num">'+f1(a)+'</td><td class="num">'+f1(b)+'</td><td class="d num">'+dchip(b,a)+'</td></tr>';});
+  return '<div class="band"><div class="who">Company · All Providers <small>consolidated procedure mix · per 100 visits · Jan–Jun</small></div><div class="note">select a provider above to drill in</div></div>'
+    +'<table class="t"><thead><tr><th class="lab">Procedure</th><th>2025</th><th>2026</th><th class="d">Δ YoY</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+// COMPACT: provider procedures that moved, sorted by |YoY delta|
+function compact(){
+  const p=D.prov;
+  const procs=D.G.filter(g=>p["2025"]._agg[g]>0||p["2026"]._agg[g]>0)
+    .map(g=>({g,d:Math.abs(p["2026"]._agg[g]-p["2025"]._agg[g])})).sort((a,b)=>b.d-a.d).map(x=>x.g);
+  let body='';
+  procs.forEach((g,i)=>{
+    const a=p["2025"]._agg[g],b=p["2026"]._agg[g],co=D.comp["2026"]._agg[g];
+    body+='<tbody>';
+    body+='<tr class="prov" data-g="'+g+'"><td class="proc"><span class="tw">▸</span>'+g+'</td>'
+      +'<td class="num">'+f1(a)+'</td><td class="num">'+f1(b)+'</td><td class="d num">'+dchip(b,a)+'</td>'
+      +'<td class="num vs">'+f1(co)+'</td><td>'+vsChip(b,co)+'</td></tr>';
+    body+='<tr class="detail hide" data-d="'+g+'"><td colspan="6">'+monthDetail(g)+'</td></tr>';
+    body+='</tbody>';
+  });
+  const v25=p["2025"]._visits.reduce((x,y)=>x+y,0),v26=p["2026"]._visits.reduce((x,y)=>x+y,0);
+  return '<div class="band"><div class="who">Trevor Parker <small>Dothan Smiles · Alabama · General Dentist · '+v25.toLocaleString()+' visits ’25 → '+v26.toLocaleString()+' ’26 (MTD)</small></div><div class="note">procedures per 100 visits · biggest shift first · click to expand</div></div>'
+    +'<table class="t"><thead><tr><th class="lab">Procedure</th><th>2025</th><th>2026</th><th class="d">Δ YoY</th><th>Company ’26</th><th></th></tr></thead>'+body+'</table>';
+}
+
+// MONTH DETAIL for one procedure: provider 25/26, state 25/26, company 25/26
+function monthDetail(g){
+  function rrow(cls,lbl,arr){let c=MO.map((m,i)=>'<td class="num">'+f1(arr[i])+'</td>').join('');return '<tr class="'+cls+'"><td class="l">'+lbl+'</td>'+c+'</tr>';}
+  let h='<tr><th class="l">'+g+' · per 100 visits</th>'+MO.map((m,i)=>'<th>'+m+(i===5?' (MTD)':'')+'</th>').join('')+'</tr>';
+  let b='';
+  b+=rrow('y25','Provider 2025',D.prov["2025"][g]);
+  b+=rrow('y26','Provider 2026',D.prov["2026"][g]);
+  b+=rrow('bm sep','Across Alabama 2025',D.state["2025"][g]);
+  b+=rrow('bm','Across Alabama 2026',D.state["2026"][g]);
+  b+=rrow('bm sep','Across Company 2025',D.comp["2025"][g]);
+  b+=rrow('bm','Across Company 2026',D.comp["2026"][g]);
+  return '<div class="dwrap"><div class="dh">Monthly shape — '+g+' · 2025 vs 2026, with state &amp; company context</div><table class="mo"><thead>'+h+'</thead><tbody>'+b+'</tbody></table></div>';
+}
+
+document.getElementById('landing').innerHTML=landing();
+document.getElementById('compact').innerHTML=compact();
+document.querySelectorAll('tr.prov').forEach(tr=>{tr.addEventListener('click',()=>{
+  const g=tr.dataset.g,d=document.querySelector('tr.detail[data-d="'+g+'"]');
+  const tw=tr.querySelector('.tw');const open=d.classList.toggle('hide')===false;
+  tw.textContent=open?'▾':'▸';});});
+// pre-open Filling to show the detail state
+(function(){const t=document.querySelector('tr.prov[data-g="Filling"]');if(t)t.click();})();
+</script></body></html>
