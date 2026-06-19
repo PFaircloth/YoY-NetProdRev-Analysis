@@ -42,6 +42,11 @@ PROC_GROUPS = {
     "Bone Graft": ["[Bone Graft]"],
     "Denture":    ["[Denture]"],
     "Bridge":     ["[Bridge]"],
+    # 10th group — residual/bundled "everything outside the 9 tracked procedures".
+    # Counts-only; the [Other $] dollar column stays dormant. ~88% of all counts —
+    # predominantly hygiene/preventive at general offices, specialty at OMS/ortho.
+    # Rendered set apart from the 9 (see report.py t5 "Preventive / Other" section).
+    "Other":      ["[Other]"],
 }
 GROUP_ORDER = list(PROC_GROUPS.keys())
 
@@ -277,6 +282,7 @@ def build_mix_dataset():
             "month_labels": [pipeline.MONTH_LABELS[m] for m in months],
             "year_1": config.YEAR_1, "year_2": config.YEAR_2,
             "groups": GROUP_ORDER,
+            "other_group": "Other",  # peel-off marker: rendered apart from the 9 (residual/hygiene)
             "group_columns": {g: PROC_GROUPS[g] for g in GROUP_ORDER},
             "empty_columns": empty_cols,
             "null_named_rows_dropped": null_named,

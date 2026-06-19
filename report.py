@@ -433,6 +433,13 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 #tab5 .t5legend{font-size:11px;color:var(--t5-faint);margin:14px 2px 0;display:flex;gap:20px;flex-wrap:wrap}
 #tab5 .t5legend b{color:var(--t5-soft)}
 #tab5 tr.t5prov:focus-visible{outline:2px solid var(--t5-accent);outline-offset:-2px}
+/* Preventive / Other — residual, hygienist-driven category set apart from the 9 procedures */
+#tab5 tr.t5sec td{background:#eef2f7;color:var(--t5-soft);font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;text-align:left;border-top:2px solid var(--t5-accent)}
+#tab5 tr.t5other td{background:#f6f4fb}
+#tab5 tr.t5other:hover td{background:#efeaf8}
+#tab5 tr.t5other td.proc{color:#5b4a86;font-style:italic;font-weight:600}
+#tab5 .t5oinfo{cursor:help;color:var(--t5-faint);font-weight:400;margin-left:5px}
+#tab5 table.t5tbl td.num{white-space:nowrap}
 @media(max-width:880px){#tab5 .t5band{flex-direction:column;align-items:flex-start;gap:4px}#tab5 .t5band .note{text-align:left}#tab5 table.t5tbl,#tab5 .t5dwrap{display:block;overflow-x:auto}}
 </style>
 </head>
@@ -708,7 +715,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
       <label>Provider:</label>
       <select id="t5Provider" class="big"></select>
     </div>
-    <div class="t5intro">Procedure composition shown as <b>per 100 visits</b> (mix, not raw volume).__MTD_HINT__ A procedure shows if it had activity in <b>either</b> year. <b>&Delta; = 2026 &minus; 2025</b> (YoY shift). Click a procedure for its monthly shape.</div>
+    <div class="t5intro">Procedure composition shown as <b>per 100 visits</b> (mix, not raw volume).__MTD_HINT__ A procedure shows if it had activity in <b>either</b> year. <b>&Delta; = 2026 &minus; 2025</b> (YoY shift). Click a procedure for its monthly shape. The <b>Preventive / Other</b> row captures activity outside the 9 tracked procedures &mdash; predominantly cleanings/hygiene/preventive at general offices, but specialty procedures at surgical &amp; ortho offices; hygienist-driven in most cases. Its per-100 runs much higher (multiple codes per hygiene visit), so it&rsquo;s shown in its own section rather than ranked against the restorative rows.</div>
     <div id="t5Wrap"></div>
     <div class="t5legend">
       <span><b>&Delta;</b> YoY shift in per-100-visits &middot; <span class="t5up">&#9650; up</span> &middot; <span class="t5down">&#9660; down</span></span>
@@ -1539,9 +1546,16 @@ function t4Bind(){
 // Build-1 mix_dataset payload — benchmarks rendered as-is, nothing locked recomputed)
 // ══════════════════════════════════════════════════════════════════════════════
 var MIX=__MIX_DATA__;
-var MG=(MIX.meta&&MIX.meta.groups)||[];        // 9 procedure groups, canonical order
+var MG=(MIX.meta&&MIX.meta.groups)||[];        // procedure groups, canonical order (9 tracked + Other)
 var MYT=(MIX.meta&&MIX.meta.active_months.length)||MO.length;  // YTD index in per100/visits arrays
 var T5_INACTIVE_FRAC=0.05;   // 2026 YTD visits below this fraction of 2025 → activity label (tunable)
+// "Other" = residual/bundled category (everything outside the 9 tracked procedures); rendered
+// set apart from the 9 (own section, muted shade) — hygienist-driven, NOT a 10th restorative row.
+var T5_OTHER=(MIX.meta&&MIX.meta.other_group)||'Other';
+var T5_OTHER_LABEL='Other (primarily hygiene / preventive)';
+var T5_OTHER_NOTE='Other captures activity outside the 9 tracked procedures — predominantly cleanings/hygiene/preventive at general offices, but includes specialty procedures at surgical and ortho offices. Hygienist-driven in most cases.';
+var MG9=MG.filter(function(g){return g!==T5_OTHER;});  // the 9 tracked procedures (Other peeled off)
+var T5_HAS_OTHER=MG.indexOf(T5_OTHER)>=0;
 
 var MIX_BY_OFFICE={};
 for(var _mi=0;_mi<(MIX.providers||[]).length;_mi++){var _mp=MIX.providers[_mi];(MIX_BY_OFFICE[_mp.office]=MIX_BY_OFFICE[_mp.office]||[]).push(_mp);}
@@ -1599,8 +1613,13 @@ function t5Landing(){
   }
   if(!scope)return '<div class="t5prompt"><div class="ic">&#128138;</div><p>No mix data for this scope.</p></div>';
   var rows='';
-  for(var gi=0;gi<MG.length;gi++){var g=MG[gi];var a=scope.per100[g].y1[MYT],b=scope.per100[g].y2[MYT];
+  for(var gi=0;gi<MG9.length;gi++){var g=MG9[gi];var a=scope.per100[g].y1[MYT],b=scope.per100[g].y2[MYT];
     rows+='<tr><td class="proc">'+g+'</td><td class="num">'+t5f1(a)+'</td><td class="num">'+t5f1(b)+'</td><td class="dc num">'+t5Delta(b,a)+'</td></tr>';
+  }
+  if(T5_HAS_OTHER){var oa=scope.per100[T5_OTHER].y1[MYT],ob=scope.per100[T5_OTHER].y2[MYT];
+    rows+='<tr class="t5sec"><td colspan="4">Preventive / Other</td></tr>';
+    rows+='<tr class="t5other"><td class="proc">'+T5_OTHER_LABEL+'<span class="t5oinfo" title="'+T5_OTHER_NOTE+'">&#9432;</span></td>'
+      +'<td class="num">'+t5f1(oa)+'</td><td class="num">'+t5f1(ob)+'</td><td class="dc num">'+t5Delta(ob,oa)+'</td></tr>';
   }
   return '<div class="t5band"><div class="who">'+title+' <small>consolidated procedure mix &middot; material contributors (cum. 90% + 2% floor) &middot; per 100 visits &middot; '+MO[0]+'&ndash;'+MO[MYT-1]+'</small></div><div class="note">'+sub+'<br>select a provider above to drill in</div></div>'
     +'<table class="t5tbl"><thead><tr><th class="lab">Procedure</th><th>2025</th><th>2026</th><th class="dc">&Delta; YoY</th></tr></thead><tbody>'+rows+'</tbody></table>';
@@ -1613,23 +1632,29 @@ function t5Compact(office,prov){
   var st=t5Status(rec),inactive=st.code!=='active';
   var role=(T5_ROLE[office]||{})[prov]||'';
   var v25=rec.visits.y1[MYT],v26=rec.visits.y2[MYT];
-  var procs=MG.filter(function(g){return (rec.counts[g].y1[MYT]>0)||(rec.counts[g].y2[MYT]>0);})
+  var procs=MG9.filter(function(g){return (rec.counts[g].y1[MYT]>0)||(rec.counts[g].y2[MYT]>0);})
     .map(function(g){var a=rec.per100[g].y1[MYT],b=inactive?null:rec.per100[g].y2[MYT];
       return {g:g,sort:(a!=null&&b!=null)?Math.abs(b-a):(a!=null?a:(b||0))};})
     .sort(function(x,y){return y.sort-x.sort;}).map(function(o){return o.g;});
-  var body='';
-  for(var i=0;i<procs.length;i++){var g=procs[i];
+  function t5Row(g,extraCls,lbl){
     var a=rec.per100[g].y1[MYT],b=inactive?null:rec.per100[g].y2[MYT],co=MIX.company_benchmark.per100[g].y2[MYT];
-    body+='<tbody>';
-    body+='<tr class="t5prov" data-g="'+t4esc(g)+'" tabindex="0" role="button" aria-expanded="false">'
-      +'<td class="proc"><span class="tw">&#9656;</span>'+g+'</td>'
+    var s='<tbody>';
+    s+='<tr class="t5prov'+(extraCls||'')+'" data-g="'+t4esc(g)+'" tabindex="0" role="button" aria-expanded="false">'
+      +'<td class="proc"><span class="tw">&#9656;</span>'+lbl+'</td>'
       +'<td class="num">'+t5f1(a)+'</td>'
       +'<td class="num">'+(inactive?'<span class="t5muted">&mdash;</span>':t5f1(b))+'</td>'
       +'<td class="dc num">'+(inactive?'<span class="t5vs">&mdash;</span>':t5Delta(b,a))+'</td>'
       +'<td class="num t5vs">'+t5f1(co)+'</td>'
       +'<td>'+(inactive?'<span class="t5chip in">&mdash;</span>':t5Vs(b,co))+'</td></tr>';
-    body+='<tr class="t5detail" style="display:none"><td colspan="6">'+t5Month(rec,g,st)+'</td></tr>';
-    body+='</tbody>';
+    s+='<tr class="t5detail" style="display:none"><td colspan="6">'+t5Month(rec,g,st)+'</td></tr>';
+    return s+'</tbody>';
+  }
+  var body='';
+  for(var i=0;i<procs.length;i++){body+=t5Row(procs[i],'',procs[i]);}
+  // Other rendered set apart (own section, muted shade); always shown (~88% of counts)
+  if(T5_HAS_OTHER&&((rec.counts[T5_OTHER].y1[MYT]>0)||(rec.counts[T5_OTHER].y2[MYT]>0))){
+    body+='<tbody><tr class="t5sec"><td colspan="6">Preventive / Other</td></tr></tbody>';
+    body+=t5Row(T5_OTHER,' t5other',T5_OTHER_LABEL+'<span class="t5oinfo" title="'+T5_OTHER_NOTE+'">&#9432;</span>');
   }
   var note=inactive?'<div class="t5note">&#9888; <span class="t5inactive">'+st.label+'</span> &mdash; 2026 procedure mix is not shown (a visit-based rate is not meaningful here); showing 2025 mix. Monthly context still available on expand.</div>':'';
   var band='<div class="t5band"><div class="who">'+prov+' <small>'+office.replace(/&/g,'&amp;')+(rec.state?' &middot; '+rec.state:'')+(role?' &middot; '+role:'')+' &middot; '+v25.toLocaleString()+' visits &rsquo;25 &rarr; '+v26.toLocaleString()+' &rsquo;26'+(MTD_ON?' (MTD)':'')+'</small></div><div class="note">per 100 visits &middot; biggest shift first &middot; click to expand</div></div>';
@@ -1643,7 +1668,8 @@ function t5Month(rec,g,st){
     var c='';for(var i=0;i<MYT;i++)c+='<td class="num">'+(blank?'<span class="t5muted">&mdash;</span>':t5f1(arr?arr[i]:null))+'</td>';
     return '<tr class="'+cls+'"><td class="l">'+lbl+'</td>'+c+'</tr>';
   }
-  var h='<tr><th class="l">'+g+' &middot; per 100 visits</th>';
+  var glab=(g===T5_OTHER)?T5_OTHER_LABEL:g;
+  var h='<tr><th class="l">'+glab+' &middot; per 100 visits</th>';
   for(var i=0;i<MYT;i++)h+='<th>'+MO[i]+'</th>';
   h+='</tr>';
   var b='';
@@ -1653,7 +1679,7 @@ function t5Month(rec,g,st){
   b+=row('t5bm','Across '+state+' 2026',sb?sb.per100[g].y2:null,false);
   b+=row('t5bm t5sep','Across Company 2025',cb.per100[g].y1,false);
   b+=row('t5bm','Across Company 2026',cb.per100[g].y2,false);
-  return '<div class="t5dwrap"><div class="t5dh">Monthly shape &mdash; '+g+' &middot; 2025 vs 2026, with state &amp; company context</div><table class="t5mo"><thead>'+h+'</thead><tbody>'+b+'</tbody></table></div>';
+  return '<div class="t5dwrap"><div class="t5dh">Monthly shape &mdash; '+glab+' &middot; 2025 vs 2026, with state &amp; company context</div><table class="t5mo"><thead>'+h+'</thead><tbody>'+b+'</tbody></table></div>';
 }
 
 function t5OfficeOptions(){
