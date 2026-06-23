@@ -1,6 +1,588 @@
 import json
 import config
 import pipeline
+from mix_dollars import (realization_diagnostic, tag_for, monthly_realization_trend,
+                         monthly_realization_by_office)
+
+# ── View 1: Realization Diagnostic — (label, css, plain-language tooltip) per driver ──
+_RZ_TAG = {
+    "collecting": ("Collecting less", "rz-bad",
+                   "Net/proc fell because the write-off rate rose (gross held) — a collections problem."),
+    "billing":    ("Billing less", "rz-warn",
+                   "Net/proc fell because gross/proc dropped — a pricing/fee problem."),
+    "both":       ("Both", "rz-bad",
+                   "Gross softened AND the write-off rate rose."),
+    "mix":        ("Mixed", "rz-mut",
+                   "Net/proc moved without a single clear write-off-rate or gross driver."),
+    "masked":     ("Realization &darr; &mdash; masked by gross", "rz-warn",
+                   "The write-off rate rose, but net/proc only held because gross rose to cover it — deterioration hidden by a fee increase."),
+    "up":         ("Realization held", "rz-good",
+                   "Write-off rate flat or improved."),
+}
+
+
+def _rz_pct(x, dec=1):
+    return "&mdash;" if x is None else f"{x*100:.{dec}f}%"
+
+
+def _rz_ppt(x, dec=1):
+    return "&mdash;" if x is None else f"{x*100:+.{dec}f} pt"
+
+
+def _rz_money(x):
+    return "&mdash;" if x is None else f"${x:,.0f}"
+
+
+def _rz_dmoney(x):
+    return "&mdash;" if x is None else f"{'+' if x >= 0 else '&minus;'}${abs(x):,.0f}"
+
+
+def _rz_km(x):
+    """Compact dollars for the totals table: $3.66M / $798K / $420."""
+    if x is None:
+        return "&mdash;"
+    ax = abs(x)
+    if ax >= 1e6:
+        return f"${ax/1e6:.2f}M"
+    if ax >= 1e3:
+        return f"${ax/1e3:.0f}K"
+    return f"${ax:,.0f}"
+
+
+def _rz_dkm(x):
+    """Signed compact dollars (YoY deltas): +$316K / &minus;$107K."""
+    return "&mdash;" if x is None else (("+" if x >= 0 else "&minus;") + _rz_km(abs(x)))
+
+
+def _realization_card(diag, scope_label, monthly_t):
+    """Render one realization card (company OR one office) from a realization_diagnostic
+    payload. Per-procedure basis; side-by-side 2025 | 2026 | Δ for each metric; the shaded
+    write-off hero is dollar-led ($/proc written off, 2026 emphasized, rate beneath, pt Δ
+    in its own column). Honest blanks for thin (office,group) cells; legitimately-negative
+    office rates (net credits > write-offs) shown as-is with a † note. Lead + KPIs are
+    entity-aware so an office never inherits the company's qualitative claims. Each row is
+    click-to-explode into its monthly Net/proc trend (monthly_t is THIS scope's series, so
+    the explode re-scopes with the office slicer)."""
+    h = diag["headline"]
+    y1, y2 = diag["meta"]["year_1"], diag["meta"]["year_2"]
+
+    def _g(gp, c):
+        return (gp * c) if (gp is not None and c) else 0.0
+
+    def _arrow(v):
+        return "&#9650;" if (v and v > 0) else ("&#9660;" if (v and v < 0) else "")
+
+    # honest-blank: drop procedures with no activity in EITHER year; SORT by size (gross $)
+    rows_live = [r for r in diag["rows"] if (r["count25"] or 0) > 0 or (r["count26"] or 0) > 0]
+    items = sorted(({**r, "g26": _g(r["gross_per26"], r["count26"])} for r in rows_live),
+                   key=lambda x: x["g26"], reverse=True)
+
+    has_credit = [False]
+
+    def wo_cell(wo, gp, big):
+        """$/proc written off (= rate × gross/proc), with the rate beneath. Big = 2026."""
+        wod = (wo * gp) if (wo is not None and gp is not None) else None
+        acls = "rz-wo-amt" if big else "rz-wo-amt2"
+        if wod is None:
+            return f'<div class="{acls}">&mdash;</div><div class="rz-wo-rate">&mdash;</div>'
+        if wod < 0:   # net credits exceeded write-offs (small office denominator) — real, not a bug
+            has_credit[0] = True
+            mark = ('<span class="rz-cr" title="Net credits / adjustments exceeded write-offs here '
+                    '&mdash; a real net positive on a small office denominator, not a write-off or a bug.">&dagger;</span>')
+            return (f'<div class="{acls} rz-credit">&minus;${abs(wod):,.0f}{mark}</div>'
+                    f'<div class="rz-wo-rate rz-credit">{_rz_pct(wo)}</div>')
+        return f'<div class="{acls}">{_rz_money(wod)}</div><div class="rz-wo-rate">{_rz_pct(wo)}</div>'
+
+    trs = []
+    for x in items:
+        label, cls, tip = _RZ_TAG.get(x["tag"], ("&mdash;", "rz-mut", ""))
+        dwo, dgp, dnp = x["d_wo"], x["d_gross_per"], x["d_net_per"]
+        rate_cls = "nc" if (dwo and dwo > 0) else ("pc" if (dwo and dwo < 0) else "")
+        dgp_cls = "pc" if (dgp and dgp > 0) else ("nc" if (dgp and dgp < 0) else "")
+        dnp_cls = "pc" if (dnp and dnp > 0) else ("nc" if (dnp and dnp < 0) else "")
+        scale = f'{int(x["count26"] or 0):,} procs &middot; {_rz_km(x["net26"])} net'
+        trs.append(
+            '<tr class="rz-row" onclick="rzToggle(this)">'
+            f'<td class="l"><span class="rz-caret">&#9654;</span>{x["group"]}<div class="rz-sub rz-size">{scale}</div></td>'
+            f'<td>{_rz_money(x["gross_per25"])}</td><td>{_rz_money(x["gross_per26"])}</td>'
+            f'<td class="{dgp_cls}">{_rz_dmoney(dgp)}</td>'
+            f'<td class="rz-hero">{wo_cell(x["wo25"], x["gross_per25"], False)}</td>'
+            f'<td class="rz-hero rz-hero26">{wo_cell(x["wo26"], x["gross_per26"], True)}</td>'
+            f'<td class="rz-hero {rate_cls}"><b>{_arrow(dwo)} {_rz_ppt(dwo)}</b></td>'
+            f'<td>{_rz_money(x["net_per25"])}</td><td>{_rz_money(x["net_per26"])}</td>'
+            f'<td class="{dnp_cls}">{_rz_dmoney(dnp)}</td>'
+            f'<td><span class="rz-tag {cls}" title="{tip}">{label}</span></td>'
+            '</tr>'
+            f'<tr class="rz-exp" style="display:none"><td colspan="11">{_rz_net_explode(monthly_t, x["group"])}</td></tr>'
+        )
+
+    # entity-aware "control": did gross/proc hold? (majority of live procedures rose)
+    deltas = [r["d_gross_per"] for r in rows_live if r["d_gross_per"] is not None]
+    n_up = sum(1 for v in deltas if v > 0)
+    n_tot = len(deltas)
+    gross_held = n_tot > 0 and n_up * 2 >= n_tot
+    tail = (" &mdash; while gross-per-procedure held or rose. The net decline is <b>collection, not price</b>."
+            if gross_held else
+            " &mdash; and gross-per-procedure also softened, so both collection and billing are in play.")
+
+    dpts = h["d_pts"]
+    if dpts is None:
+        lead = f"Not enough closed data to summarize realization {scope_label}."
+    elif h["wo26"] is not None and h["wo26"] < 0:
+        # net-credit scope (credits/adjustments exceeded write-offs) — honest, not a bug
+        lead = (f"Net credits and adjustments <b>exceeded</b> write-offs {scope_label} "
+                f"(a net <b class=\"pc\">{abs(h['wo26'])*100:.1f}%</b> positive on a small denominator) "
+                f"&mdash; realization isn't the concern at this scope; read individual procedures below.")
+    elif dpts > 0.0005:
+        lead = (f"Realization is eroding {scope_label}. We wrote off <b>{_rz_pct(h['wo25'])}</b> of gross "
+                f"production in {y1} and <b>{_rz_pct(h['wo26'])}</b> in {y2} &mdash; "
+                f"<b class=\"nc\">{dpts*100:+.1f} points</b> more{tail}")
+    elif dpts < -0.0005:
+        lead = (f"Realization <b>improved</b> {scope_label}. We wrote off <b>{_rz_pct(h['wo25'])}</b> of gross "
+                f"production in {y1} and <b>{_rz_pct(h['wo26'])}</b> in {y2} &mdash; "
+                f"<b class=\"pc\">{abs(dpts)*100:.1f} points</b> less.")
+    else:
+        lead = (f"Realization held roughly flat {scope_label} &mdash; <b>{_rz_pct(h['wo25'])}</b> in {y1} "
+                f"vs <b>{_rz_pct(h['wo26'])}</b> in {y2}.{tail}")
+
+    dpts_cls = "" if dpts is None else ("neg" if dpts > 0 else "pos")
+    held_cls, held_word = ("pos", "Held") if gross_held else ("neg", "Softened")
+    credit_note = ('<div class="rz-foot">&dagger; a negative write-off = net credits / adjustments exceeded '
+                   'write-offs (small office denominators) &mdash; a real net positive, not a bug.</div>'
+                   if has_credit[0] else '')
+
+    return f"""
+  <div class="card realz-card">
+    <div class="section-lbl">Realization &mdash; what we bill vs. what we keep (gross &rarr; write-offs &rarr; net, by procedure)</div>
+    <div class="rz-lead-stmt">{lead}</div>
+    <div class="rz-def"><b>What is realization?</b> The share of what you bill (gross) that you keep (net),
+      after insurance write-offs and adjustments. Write-off rate = Adjustments &divide; Gross. When it rises,
+      you're doing the same work and keeping less &mdash; a collections problem, not a fee or volume one.</div>
+    <div class="rz-kpis">
+      <div class="kpi"><div class="kpi-lbl">% written off &mdash; {y1}</div><div class="kpi-val">{_rz_pct(h['wo25'])}</div><div class="rz-ksub">Adj &divide; Gross</div></div>
+      <div class="kpi"><div class="kpi-lbl">% written off &mdash; {y2}</div><div class="kpi-val">{_rz_pct(h['wo26'])}</div><div class="rz-ksub">Adj &divide; Gross</div></div>
+      <div class="kpi"><div class="kpi-lbl">&Delta; realization</div><div class="kpi-val {dpts_cls}">{_rz_ppt(dpts)}</div><div class="rz-ksub">more written off = worse</div></div>
+      <div class="kpi"><div class="kpi-lbl">Gross/proc (control)</div><div class="kpi-val {held_cls}">{held_word}</div><div class="rz-ksub">{n_up}/{n_tot} procs&rsquo; gross/proc rose</div></div>
+    </div>
+    <div class="rz-nav">(This is the $/Visit half of the Rev/Day decline &mdash; see Office Analysis for the lever breakdown.)</div>
+    <div class="hint">Sorted by <b>procedure size</b> (total gross). Each metric shows <b>2025, 2026 and the change</b> side by side. Columns flow <b>gross/proc &rarr; write-off/proc &rarr; net/proc</b> (per procedure, volume removed). The shaded write-off column is <b>dollar-led</b> &mdash; $ written off per procedure (2026 emphasized), the rate (% of gross) beneath, and the YoY point change in its &Delta; column.</div>
+    <table class="rz-tbl">
+      <thead>
+        <tr><th class="l" rowspan="2">Procedure<div class="rz-h2">&amp; scale (procs &middot; net)</div></th>
+          <th colspan="3">Gross / proc</th>
+          <th class="rz-hero" colspan="3">Write-off / proc &mdash; lost<div class="rz-h2">$ per proc &middot; % of gross</div></th>
+          <th colspan="3">Net / proc</th>
+          <th rowspan="2">Driver</th></tr>
+        <tr><th>{y1}</th><th>{y2}</th><th>&Delta;</th>
+          <th class="rz-hero">{y1}</th><th class="rz-hero rz-hero26">{y2}</th><th class="rz-hero">&Delta; pt</th>
+          <th>{y1}</th><th>{y2}</th><th>&Delta;</th></tr>
+      </thead>
+      <tbody>{''.join(trs)}</tbody>
+    </table>
+    {credit_note}
+    <div class="rz-legend">
+      <span><b>Collecting less</b> &mdash; net/proc fell because the write-off rate rose (gross held): a collections problem.</span>
+      <span><b>Billing less</b> &mdash; net/proc fell because gross/proc dropped: a pricing/fee problem.</span>
+      <span><b>Both</b> &mdash; gross softened AND the write-off rate rose.</span>
+      <span><b>Realization &darr; masked by gross</b> &mdash; the write-off rate rose, but net/proc only held because gross rose to cover it (deterioration hidden by a fee increase).</span>
+      <span><b>Realization held</b> &mdash; write-off rate flat or improved.</span>
+    </div>
+  </div>"""
+
+
+# ── View 1 — MONTHLY realization trend (write-off-rate shape, 2025 vs 2026) ───
+_RZ_C25, _RZ_C26 = "#9aa6b8", "#C0392B"   # 2025 grey, 2026 house-red
+
+
+def _rz_trend_svg(t):
+    """Company write-off-rate line chart: 2025 vs 2026 over the active window, with the
+    YoY gap shaded and the MTD month drawn provisional. Pure inline SVG (no JS/deps)."""
+    months = t["meta"]["active_months"]
+    mtd = t["meta"]["mtd_month"]
+    closed = [m for m in months if m != mtd]
+    lab = t["meta"]["month_labels"]
+    y1 = {r["month"]: r["wo"] for r in t["y1"]}
+    y2 = {r["month"]: r["wo"] for r in t["y2"]}
+    vals = [v for v in list(y1.values()) + list(y2.values()) if v is not None]
+    if not vals:
+        return '<div class="rzm-nodata">No monthly write-off data at this scope.</div>'
+    lo, hi = min(vals), max(vals)
+    pad = (hi - lo) * 0.18 or 0.01
+    ymin, ymax = lo - pad, hi + pad
+    W, H = 820, 300
+    L, R, T, B = 52, 116, 18, 38
+    pw, ph = W - L - R, H - T - B
+    n = len(months)
+    xs = {m: L + (i / (n - 1)) * pw for i, m in enumerate(months)}
+
+    def Y(v):
+        return T + (ymax - v) / (ymax - ymin) * ph
+
+    grid = []
+    step = 0.02
+    g = int(ymin / step) * step
+    while g <= ymax + 1e-9:
+        if g >= ymin:
+            yy = Y(g)
+            grid.append(f'<line x1="{L}" y1="{yy:.1f}" x2="{L+pw}" y2="{yy:.1f}" class="grid"/>'
+                        f'<text x="{L-8}" y="{yy+3:.1f}" class="ylab">{g*100:.0f}%</text>')
+        g += step
+
+    band = ""
+    if mtd in xs:
+        bx = (xs[closed[-1]] + xs[mtd]) / 2
+        band = (f'<rect x="{bx:.1f}" y="{T}" width="{L+pw-bx:.1f}" height="{ph}" class="provband"/>'
+                f'<text x="{(bx+L+pw)/2:.1f}" y="{T+11}" class="provlab">MTD &middot; provisional</text>')
+
+    def poly(series, color, dashed_tail):
+        pts_closed = [(xs[m], Y(series[m])) for m in closed if series.get(m) is not None]
+        line = ('<polyline class="ln" points="'
+                + " ".join(f"{x:.1f},{y:.1f}" for x, y in pts_closed) + f'" stroke="{color}"/>')
+        tail = ""
+        if dashed_tail and mtd in xs and series.get(mtd) is not None and series.get(closed[-1]) is not None:
+            x0, y0 = xs[closed[-1]], Y(series[closed[-1]])
+            x1, y1v = xs[mtd], Y(series[mtd])
+            tail = (f'<line class="lndash" x1="{x0:.1f}" y1="{y0:.1f}" x2="{x1:.1f}" y2="{y1v:.1f}" stroke="{color}"/>'
+                    f'<circle cx="{x1:.1f}" cy="{y1v:.1f}" r="3.2" fill="#fff" stroke="{color}" stroke-dasharray="2 1.5"/>')
+        dots = "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.4" fill="{color}"/>' for x, y in pts_closed)
+        return line + tail + dots
+
+    cl = [m for m in closed if y1.get(m) is not None and y2.get(m) is not None]
+    gap = ""
+    if len(cl) >= 2:
+        top = [(xs[m], Y(y2[m])) for m in cl]
+        bot = [(xs[m], Y(y1[m])) for m in reversed(cl)]
+        gap = ('<polygon class="gap" points="'
+               + " ".join(f"{x:.1f},{y:.1f}" for x, y in top + bot) + '"/>')
+
+    xlabels = "".join(
+        f'<text x="{xs[m]:.1f}" y="{H-B+18}" class="xlab">{lab[m]}</text>' for m in months)
+    lm = closed[-1]
+    endlbl = ""
+    for series, color, nm in ((y2, _RZ_C26, str(t['meta']['year_2'])),
+                              (y1, _RZ_C25, str(t['meta']['year_1']))):
+        if series.get(lm) is not None:
+            endlbl += (f'<text x="{xs[lm]+8:.1f}" y="{Y(series[lm])+3:.1f}" class="endlab" '
+                       f'fill="{color}">{nm} &middot; {series[lm]*100:.1f}%</text>')
+    return (f'<svg viewBox="0 0 {W} {H}" class="trend" role="img" '
+            f'aria-label="Monthly write-off rate, {t["meta"]["year_1"]} vs {t["meta"]["year_2"]}">'
+            + "".join(grid) + band + gap
+            + poly(y1, _RZ_C25, True) + poly(y2, _RZ_C26, True)
+            + xlabels + endlbl + "</svg>")
+
+
+def _rz_spark(g, t):
+    """Tiny per-procedure 2025-vs-2026 write-off sparkline over closed months."""
+    closed = [m for m in t["meta"]["active_months"] if m != t["meta"]["mtd_month"]]
+    y1 = {r["month"]: r["per_group"][g]["wo"] for r in t["y1"]}
+    y2 = {r["month"]: r["per_group"][g]["wo"] for r in t["y2"]}
+    vals = [v for v in list(y1.values()) + list(y2.values()) if v is not None]
+    if len([m for m in closed if y2.get(m) is not None]) < 3:
+        return None
+    lo, hi = min(vals), max(vals)
+    rng = (hi - lo) or 1.0
+    w, h = 104, 30
+    n = len(closed)
+    xs = {m: 2 + (i / (n - 1)) * (w - 4) for i, m in enumerate(closed)}
+
+    def Y(v):
+        return 3 + (hi - v) / rng * (h - 6)
+
+    def pl(series, color):
+        pts = [(xs[m], Y(series[m])) for m in closed if series.get(m) is not None]
+        if len(pts) < 2:
+            return ""
+        return (f'<polyline points="{" ".join(f"{x:.1f},{y:.1f}" for x,y in pts)}" '
+                f'fill="none" stroke="{color}" stroke-width="1.4"/>')
+    return (f'<svg viewBox="0 0 {w} {h}" class="spark">' + pl(y1, _RZ_C25) + pl(y2, _RZ_C26) + "</svg>")
+
+
+def _rz_net_explode(t, group):
+    """Hidden explode for one procedure row: that procedure's NET / procedure by month,
+    2025 vs 2026, mirroring the write-off trend's visual language (months X, two-year
+    compare, June dashed/flagged MTD) + a compact Net/proc 25 | 26 | Δ strip. `t` is the
+    CURRENT scope's monthly series (company or the selected office) — so the explode
+    re-scopes with the slicer. Thin discipline: a month plots only with >=3 procedures
+    that month; a year's line draws only with >=2 plottable closed months; otherwise an
+    honest text-blank (no jumpy line on 1-2 procedures/month)."""
+    MIN = 3
+    mths = t["meta"]["active_months"]
+    mtd = t["meta"]["mtd_month"]
+    closed = [m for m in mths if m != mtd]
+    lab = t["meta"]["month_labels"]
+    y1y, y2y = t["meta"]["year_1"], t["meta"]["year_2"]
+    c25 = {r["month"]: r["per_group"][group] for r in t["y1"]}
+    c26 = {r["month"]: r["per_group"][group] for r in t["y2"]}
+
+    def npv(c, m):
+        return c[m]["net_per"] if (c[m]["count"] or 0) >= MIN else None
+    y1 = {m: npv(c25, m) for m in mths}
+    y2 = {m: npv(c26, m) for m in mths}
+    p1 = [m for m in closed if y1[m] is not None]
+    p2 = [m for m in closed if y2[m] is not None]
+    if len(p1) < 2 and len(p2) < 2:
+        return ('<div class="rz-exp-h">Net / procedure by month</div>'
+                f'<div class="rz-exp-note">Too thin to chart at this scope &mdash; under {MIN} '
+                f'{group} procedures per month, so a monthly Net/proc line would be noise, not signal.</div>')
+
+    vals = [v for v in list(y1.values()) + list(y2.values()) if v is not None]
+    lo, hi = min(vals), max(vals)
+    pad = (hi - lo) * 0.22 or max(hi * 0.04, 1.0)
+    ymin, ymax = lo - pad, hi + pad
+    W, H = 720, 200
+    L, R, T, B = 60, 92, 14, 28
+    pw, ph = W - L - R, H - T - B
+    n = len(mths)
+    xs = {m: L + (i / (n - 1)) * pw for i, m in enumerate(mths)}
+
+    def Y(v):
+        return T + (ymax - v) / (ymax - ymin) * ph
+
+    grid = []
+    for i in range(4):
+        gv = ymin + i * (ymax - ymin) / 3
+        yy = Y(gv)
+        grid.append(f'<line x1="{L}" y1="{yy:.1f}" x2="{L+pw}" y2="{yy:.1f}" class="grid"/>'
+                    f'<text x="{L-6}" y="{yy+3:.1f}" class="ylab">${gv:,.0f}</text>')
+
+    band = ""
+    if mtd in xs:
+        bx = (xs[closed[-1]] + xs[mtd]) / 2
+        band = (f'<rect x="{bx:.1f}" y="{T}" width="{L+pw-bx:.1f}" height="{ph}" class="provband"/>'
+                f'<text x="{(bx+L+pw)/2:.1f}" y="{T+10}" class="provlab">{lab[mtd]} MTD</text>')
+
+    def poly(series, color):
+        pts = [(xs[m], Y(series[m])) for m in closed if series[m] is not None]
+        line = ('<polyline class="ln" points="' + " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+                + f'" stroke="{color}"/>') if len(pts) >= 2 else ""
+        tail = ""
+        if mtd in xs and series[mtd] is not None and series[closed[-1]] is not None:
+            x0, y0 = xs[closed[-1]], Y(series[closed[-1]])
+            x1, y1v = xs[mtd], Y(series[mtd])
+            tail = (f'<line class="lndash" x1="{x0:.1f}" y1="{y0:.1f}" x2="{x1:.1f}" y2="{y1v:.1f}" stroke="{color}"/>'
+                    f'<circle cx="{x1:.1f}" cy="{y1v:.1f}" r="3" fill="#fff" stroke="{color}"/>')
+        dots = "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.2" fill="{color}"/>' for x, y in pts)
+        return line + tail + dots
+
+    clb = [m for m in closed if y1[m] is not None and y2[m] is not None]
+    gap = ""
+    if len(clb) >= 2:
+        top = [(xs[m], Y(y2[m])) for m in clb]
+        bot = [(xs[m], Y(y1[m])) for m in reversed(clb)]
+        gap = '<polygon class="gap" points="' + " ".join(f"{x:.1f},{y:.1f}" for x, y in top + bot) + '"/>'
+
+    xlabels = "".join(f'<text x="{xs[m]:.1f}" y="{H-B+16}" class="xlab">{lab[m]}</text>' for m in mths)
+    lm = p2[-1] if p2 else p1[-1]
+    endlbl = ""
+    for series, color, nm in ((y2, _RZ_C26, str(y2y)), (y1, _RZ_C25, str(y1y))):
+        if series.get(lm) is not None:
+            endlbl += (f'<text x="{xs[lm]+7:.1f}" y="{Y(series[lm])+3:.1f}" class="endlab" '
+                       f'fill="{color}">{nm} ${series[lm]:,.0f}</text>')
+    svg = (f'<svg viewBox="0 0 {W} {H}" class="rzx" role="img" '
+           f'aria-label="{group} net per procedure by month, {y1y} vs {y2y}">'
+           + "".join(grid) + band + gap + poly(y1, _RZ_C25) + poly(y2, _RZ_C26)
+           + xlabels + endlbl + "</svg>")
+
+    def _m(v):
+        return "&mdash;" if v is None else f"${v:,.0f}"
+
+    def _pc(m):
+        return ' class="prov"' if m == mtd else ''
+    head = "".join(f'<th{_pc(m)}>{lab[m]}</th>' for m in mths)
+    r25 = "".join(f'<td{_pc(m)}>{_m(y1[m])}</td>' for m in mths)
+    r26 = "".join(f'<td{_pc(m)}>{_m(y2[m])}</td>' for m in mths)
+
+    def dcell(m):
+        a, b = y1[m], y2[m]
+        d = None if (a is None or b is None) else (b - a)
+        base = "nc" if (d is not None and d < 0) else ("pc" if (d is not None and d > 0) else "")
+        cls = (("prov " + base).strip()) if m == mtd else base
+        txt = "&mdash;" if d is None else (("&minus;$" + f"{abs(d):,.0f}") if d < 0 else f"+${d:,.0f}")
+        return f'<td class="{cls}">{txt}</td>'
+    rdd = "".join(dcell(m) for m in mths)
+
+    table = (f'<table class="rzx-tbl"><thead><tr><th class="l">Net/proc</th>{head}</tr></thead>'
+             f'<tbody><tr><td class="l">{y1y}</td>{r25}</tr>'
+             f'<tr><td class="l">{y2y}</td>{r26}</tr>'
+             f'<tr><td class="l">&Delta;</td>{rdd}</tr></tbody></table>')
+
+    return (f'<div class="rz-exp-h">{group} &mdash; Net / procedure by month '
+            f'(<span style="color:{_RZ_C26}">{y2y}</span> vs <span style="color:{_RZ_C25}">{y1y}</span>; '
+            f'{lab[closed[0]]}&ndash;{lab[closed[-1]]} matched, {lab[mtd]} MTD/provisional)</div>'
+            f'<div class="rzx-wrap">{svg}</div>{table}')
+
+
+def _rz_monthly_card(t):
+    """Monthly write-off-rate trend card: lead chart + computed timing callout + a
+    HORIZONTAL monthly table (months across, metrics down — parallels the chart and fills
+    the width) + secondary per-procedure sparklines. Sparse-office safe."""
+    mths = t["meta"]["active_months"]
+    mtd = t["meta"]["mtd_month"]
+    closed = [m for m in mths if m != mtd]
+    lab = t["meta"]["month_labels"]
+    c25 = {r["month"]: r for r in t["y1"]}
+    c26 = {r["month"]: r for r in t["y2"]}
+    y1y, y2y = t["meta"]["year_1"], t["meta"]["year_2"]
+
+    # timing read, computed (not hardcoded): steady / accelerating / recent / thin?
+    gaps = [(c26[m]["wo"] - c25[m]["wo"]) for m in closed
+            if c25[m]["wo"] is not None and c26[m]["wo"] is not None]
+    if not gaps:
+        read = "too little paired monthly data at this scope to call the shape"
+    else:
+        first_g, last_g, min_g = gaps[0], gaps[-1], min(gaps)
+        worst26_m = max((m for m in closed if c26[m]["wo"] is not None),
+                        key=lambda m: c26[m]["wo"], default=closed[-1])
+        steady = min_g > 0.005
+        accel = last_g > first_g + 0.005
+        read = ("a <b>steady, structural gap</b> &mdash; 2026 runs above 2025 in "
+                "<b>every</b> month from January, not a recent onset"
+                if steady else "an <b>intermittent</b> gap") + (
+                f", and it <b>widens late</b> ({first_g*100:+.1f}pt in {lab[closed[0]]} &rarr; "
+                f"{last_g*100:+.1f}pt by {lab[closed[-1]]}, worst in {lab[worst26_m]} at "
+                f"{c26[worst26_m]['wo']*100:.1f}%)" if accel else
+                f", roughly flat across the window (~{sum(gaps)/len(gaps)*100:+.1f}pt)")
+
+    # HORIZONTAL table: months across the top, metric rows down the side.
+    def _pcls(m):
+        return ' class="prov"' if m == mtd else ''
+    head = ''.join(f'<th{_pcls(m)}>{lab[m]}{" (MTD)" if m == mtd else ""}</th>' for m in mths)
+
+    def cellrow(fn):
+        return ''.join(f'<td{_pcls(m)}>{fn(m)}</td>' for m in mths)
+
+    def dcell(m):
+        wo1, wo2 = c25[m]["wo"], c26[m]["wo"]
+        dg = None if (wo1 is None or wo2 is None) else (wo2 - wo1)
+        cls = "nc" if (dg and dg > 0) else ("pc" if (dg and dg < 0) else "")
+        pc = ("prov " + cls).strip() if m == mtd else cls
+        return f'<td class="{pc}"><b>{_rz_ppt(dg)}</b></td>'
+
+    row_wo25 = cellrow(lambda m: _rz_pct(c25[m]["wo"]))
+    row_wo26 = cellrow(lambda m: _rz_pct(c26[m]["wo"]))
+    row_dpt = ''.join(dcell(m) for m in mths)
+    row_gross = cellrow(lambda m: f'${c26[m]["gross"]:,.0f}')
+    row_net = cellrow(lambda m: f'${c26[m]["net"]:,.0f}')
+
+    sparks = []
+    for g in t["meta"]["groups"]:
+        s = _rz_spark(g, t)
+        if s:
+            sparks.append(f'<div class="sk"><div class="sk-l">{g}</div>{s}</div>')
+
+    return f"""<div class="card realz-monthly-card">
+    <div class="section-lbl">Is it steady, accelerating, or recent? &mdash; Monthly write-off-rate trend</div>
+    <div class="hint">Same population and corrected basis as the view above &mdash; read as a <b>shape</b>.
+      Company/office total only (procedure-level offered below; <b>provider</b>-monthly deliberately excluded
+      as too noisy on small per-month counts). Closed {lab[closed[0]]}&ndash;{lab[closed[-1]]} is the read; {lab[mtd]} is MTD/provisional.</div>
+    <div class="rzm-callout">The monthly shape shows {read}.</div>
+    <div class="rzm-wrap">{_rz_trend_svg(t)}
+      <div class="rzm-key">
+        <span><i style="background:{_RZ_C26}"></i>{y2y}</span>
+        <span><i style="background:{_RZ_C25}"></i>{y1y}</span>
+        <span><i class="gapkey"></i>YoY gap (2026 excess written off)</span>
+      </div>
+    </div>
+    <table class="rzm-tbl rzm-h">
+      <thead><tr><th class="l">Metric</th>{head}</tr></thead>
+      <tbody>
+        <tr><td class="l">% WO {y1y}</td>{row_wo25}</tr>
+        <tr><td class="l">% WO {y2y}</td>{row_wo26}</tr>
+        <tr><td class="l">&Delta; pt</td>{row_dpt}</tr>
+        <tr class="ctxrow"><td class="l">Gross $ {y2y}</td>{row_gross}</tr>
+        <tr class="ctxrow"><td class="l">Net $ {y2y}</td>{row_net}</tr>
+      </tbody>
+    </table>
+    <div class="sk-head">Per procedure &mdash; write-off shape (secondary; <span style="color:{_RZ_C26}">{y2y}</span> vs <span style="color:{_RZ_C25}">{y1y}</span>, {lab[closed[0]]}&ndash;{lab[closed[-1]]})</div>
+    <div class="sk-grid">{''.join(sparks)}</div>
+  </div>"""
+
+
+def _realization_navtab(dollar_dataset):
+    """The Realization nav-tab button — absent (so the tab bar is unchanged) when there
+    is no dollar dataset to render."""
+    if dollar_dataset is None:
+        return ""
+    return '\n  <button class="nav-tab" id="navTab6" onclick="switchTab(6)">&#128181; Realization</button>'
+
+
+def _rz_esc(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _realization_tab(dollar_dataset):
+    """The full Realization tab with an OFFICE SLICER. Pre-renders the company view
+    (default, the headline) plus every office into hidden panes; the slicer JS toggles
+    which pane is visible, so the table + KPI band + intro + monthly trend all switch
+    together. Company uses company_rendered (ties to the headline); offices use
+    office_rollup + a single-pass monthly aggregation (no per-office reload). No provider
+    slicer by design. Returns '' when no dollar dataset (tab cleanly absent)."""
+    if dollar_dataset is None:
+        return ""
+    monthly = monthly_realization_by_office()          # ONE pass: company + all offices
+
+    panes, options = [], []
+    comp_t = monthly["__company__"]
+    comp = _realization_card(realization_diagnostic(dollar_dataset), "company-wide", comp_t)
+    panes.append(f'<div class="realz-pane" id="rzpane-0">{comp}\n  {_rz_monthly_card(comp_t)}\n  </div>')
+    options.append('<option value="0">All offices (company)</option>')
+
+    for i, o in enumerate(sorted(dollar_dataset["office_rollup"], key=lambda x: x["office"]), start=1):
+        name = o["office"]
+        diag = realization_diagnostic(entity=o["groups"], scope="office · " + name)
+        office_t = monthly.get(name, monthly["__company__"])
+        card = _realization_card(diag, f"at <b>{_rz_esc(name)}</b>", office_t)
+        mcard = _rz_monthly_card(office_t)
+        panes.append(f'<div class="realz-pane" id="rzpane-{i}" style="display:none">{card}\n  {mcard}\n  </div>')
+        options.append(f'<option value="{i}">{_rz_esc(name)}</option>')
+
+    slicer = (
+        '<div class="card realz-slicer">'
+        '<label for="realzOffice">Scope:</label>'
+        f'<select id="realzOffice" onchange="realzPick(this.value)">{"".join(options)}</select>'
+        '<span class="realz-slicer-note">Company is the headline; office is an opt-in drill '
+        '&mdash; no provider level (too noisy on small denominators).</span></div>')
+
+    return ('<!-- ═══════════════════════════════════════════════════\n'
+            '     TAB 6 — REALIZATION (procedure $ / write-off diagnostic; office slicer)\n'
+            '════════════════════════════════════════════════════ -->\n'
+            f'<div id="tab6" style="display:none">{slicer}\n{"".join(panes)}</div>\n')
+
+
+# ── View 2: per-provider procedure-dollar detail (Mix Shift expand) ───────────
+def _mix_dollars_payload(dollar_dataset):
+    """Compact per-(office, provider, group) dollar lookup for the Mix Shift expand.
+    Nested {office:{provider:{group:{...}}}} so provider/office names need no delimiter.
+    Closed (matched Jan–May) window, corrected basis. Groups with no procedures in
+    either year are omitted. Returns {} when no dataset (keeps payload absent)."""
+    if dollar_dataset is None:
+        return {}
+    out = {}
+    for p in dollar_dataset["providers"]:
+        g_out = {}
+        for g in dollar_dataset["meta"]["groups"]:
+            a = p["groups"]["y1"]["closed"][g]
+            b = p["groups"]["y2"]["closed"][g]
+            if (a["count"] or 0) <= 0 and (b["count"] or 0) <= 0:
+                continue
+            wo1 = None if a["adj_rate"] is None else -a["adj_rate"]
+            wo2 = None if b["adj_rate"] is None else -b["adj_rate"]
+            dwo = None if (wo1 is None or wo2 is None) else wo2 - wo1
+            np1, np2 = a["net_per"], b["net_per"]
+            gp1, gp2 = a["gross_per"], b["gross_per"]
+            dnp = None if (np1 is None or np2 is None) else np2 - np1
+            dgp = None if (gp1 is None or gp2 is None) else gp2 - gp1
+            g_out[g] = {
+                "wo1": wo1, "wo2": wo2, "dwo": dwo,
+                "np1": np1, "np2": np2, "dnp": dnp,
+                "gp1": gp1, "gp2": gp2, "dgp": dgp,
+                "n1": a["net"], "n2": b["net"], "c1": a["count"], "c2": b["count"],
+                "tag": tag_for(dnp, dgp, dwo),
+            }
+        if g_out:
+            out.setdefault(p["office"], {})[p["provider"]] = g_out
+    return out
+
 
 # ── Data transformation: pipeline format → reference JS format ────────────────
 
@@ -127,7 +709,11 @@ def _t2_options(office_data):
 
 # ── HTML generation ───────────────────────────────────────────────────────────
 
-def generate_html(office_data, provider_data, data_summary, mix_dataset=None, consolidated=None):
+def generate_html(office_data, provider_data, data_summary, mix_dataset=None, consolidated=None,
+                  dollar_dataset=None):
+    # dollar_dataset: verified procedure-dollar layer (mix_dollars). Wired into the payload
+    # but DORMANT — no view consumes it yet (Phase 2 placement pending). Present so the
+    # plumbing is proven end-to-end; rendering is added once placement is approved.
     D, OTHER = _transform_offices(office_data)
     PD       = _transform_providers(provider_data)
     DS       = _transform_data_summary(data_summary, provider_data)
@@ -193,6 +779,11 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
     html = html.replace("__MTD_HINT__",   mtd_hint)
     html = html.replace("__MO_FIRST__",   pipeline.MONTH_LABELS[months[0]])
     html = html.replace("__MO_LAST__",    pipeline.MONTH_LABELS[months[-1]])
+    html = html.replace("__REALIZATION_NAVTAB__", _realization_navtab(dollar_dataset))
+    html = html.replace("__REALIZATION_TAB__", _realization_tab(dollar_dataset))
+    html = html.replace("__MIX_DOLLARS_DATA__",
+                        json.dumps(_mix_dollars_payload(dollar_dataset),
+                                   ensure_ascii=False, separators=(",", ":")))
     return html
 
 
@@ -301,6 +892,109 @@ td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
 .trend-legend .tl-item{display:flex;align-items:center;gap:4px;white-space:nowrap}
 .trend-legend .tl-div{width:1px;height:16px;background:#ddd;margin:0 4px}
 .hm-swatch{display:inline-block;width:28px;height:12px;border-radius:2px;vertical-align:middle;margin-right:3px}
+/* View 1 — Realization Diagnostic (own tab; per-office panes => CLASS-scoped, not #id,
+   so the pre-rendered office panes don't create duplicate ids) */
+.realz-slicer{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-left:4px solid #1F3864}
+.realz-slicer label{font-size:12px;font-weight:600;color:#1F3864}
+.realz-slicer select{padding:6px 10px;font-size:13px;border:0.5px solid #ccc;border-radius:6px;background:#fff;min-width:240px}
+.realz-slicer-note{font-size:11px;color:#999;font-style:italic}
+.realz-card{border-left:4px solid #C0392B}
+.realz-card .rz-lead-stmt{background:#fdf6f5;border:0.5px solid #f0d7d3;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12.5px;line-height:1.5;color:#333}
+.realz-card .rz-lead-stmt b{color:#1F3864}
+.realz-card .rz-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+.realz-card .rz-ksub{font-size:10px;color:#aaa;margin-top:3px}
+.realz-card .rz-ksub.pc{color:#1a7a4a}
+.realz-card .rz-ksub.nc{color:#C0392B}
+.realz-card table.rz-tbl{width:100%;border-collapse:collapse}
+.realz-card .rz-tbl th{padding:6px 5px;font-size:10px;font-weight:600;color:#666;border-bottom:1.5px solid #ddd;text-align:center;white-space:nowrap;background:#fafafa}
+.realz-card .rz-tbl th.l{text-align:left}
+.realz-card .rz-tbl td{padding:7px 5px;text-align:center;font-size:12px;border-bottom:0.5px solid #f0f0f0;font-variant-numeric:tabular-nums}
+.realz-card .rz-tbl td.l{text-align:left;font-weight:600;color:#222;font-variant-numeric:normal}
+.realz-card .rz-tbl td.nc,.realz-card .rz-lead-stmt .nc{color:#C0392B}
+.realz-card .rz-tbl td.pc{color:#1a7a4a}
+.realz-card .nc{color:#C0392B}
+.realz-card .pc{color:#1a7a4a}
+.realz-card .rz-tag{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap;cursor:help}
+.realz-card .rz-bad{background:#fbecea;color:#C0392B}
+.realz-card .rz-warn{background:#fbeede;color:#b45309}
+.realz-card .rz-good{background:#e6f4ec;color:#1a7a4a}
+.realz-card .rz-mut{background:#f3f4f6;color:#6b7280}
+.realz-card .rz-legend{font-size:10.5px;color:#666;margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:5px 18px}
+.realz-card .rz-legend b{color:#1F3864}
+.realz-card .rz-def{font-style:italic;color:#555;font-size:11.5px;line-height:1.5;background:#fafbfc;border:0.5px solid #eee;border-radius:6px;padding:9px 13px;margin-bottom:12px}
+.realz-card .rz-def b{color:#1F3864;font-style:normal}
+.realz-card .rz-nav{font-size:11px;color:#8a8a8a;font-style:italic;margin:6px 0 2px}
+.realz-card .rz-tbl th .rz-h2{font-size:9px;font-weight:400;color:#aaa;margin-top:2px;text-transform:none}
+.realz-card .rz-tbl td.l .rz-sub{font-size:10px;font-weight:400;margin-top:2px}
+.realz-card .rz-size{color:#999;font-weight:400}
+.realz-card .rz-tbl th.rz-hero{background:#e9e6f6;color:#4a3f7a}
+.realz-card .rz-tbl td.rz-hero{background:#f5f3fc}
+.realz-card .rz-tbl th.rz-hero26,.realz-card .rz-tbl td.rz-hero26{background:#ece7fa}
+.realz-card .rz-wo-amt{font-size:15px;font-weight:700;color:#3f2f73;line-height:1.1}
+.realz-card .rz-wo-amt2{font-size:12px;font-weight:600;color:#6a5a93;line-height:1.1}
+.realz-card .rz-wo-rate{font-size:10px;color:#888;margin-top:1px}
+.realz-card .rz-credit{color:#1a7a4a!important}
+.realz-card .rz-cr{color:#1a7a4a;font-weight:700;cursor:help}
+.realz-card .rz-foot{font-size:10px;color:#888;margin-top:8px;font-style:italic}
+/* click-to-explode: monthly Net/proc per row */
+.realz-card tr.rz-row{cursor:pointer}
+.realz-card tr.rz-row:hover{background:#fafaff}
+.realz-card tr.rz-open{background:#f6f3fc}
+.realz-card .rz-caret{display:inline-block;width:11px;margin-right:2px;color:#b3aacc;font-size:8px;transition:transform .12s}
+.realz-card tr.rz-open .rz-caret{transform:rotate(90deg);color:#3f2f73}
+.realz-card tr.rz-exp>td{background:#fbfafe;border-bottom:1px solid #e6e0f3;padding:10px 16px}
+.realz-card .rz-exp-h{font-size:11px;font-weight:600;color:#3f2f73;margin-bottom:6px}
+.realz-card .rz-exp-note{font-size:11.5px;color:#999;font-style:italic;padding:8px 0}
+.realz-card .rzx-wrap{max-width:760px}
+.realz-card svg.rzx{width:100%;height:auto;display:block}
+.realz-card svg.rzx .grid{stroke:#eee;stroke-width:1}
+.realz-card svg.rzx .ylab{fill:#aaa;font-size:9px;text-anchor:end}
+.realz-card svg.rzx .xlab{fill:#888;font-size:10px;text-anchor:middle}
+.realz-card svg.rzx .ln{fill:none;stroke-width:2.2}
+.realz-card svg.rzx .lndash{stroke-width:2;stroke-dasharray:4 3;opacity:.5}
+.realz-card svg.rzx .gap{fill:#C0392B;opacity:.07}
+.realz-card svg.rzx .provband{fill:#f7f7f7;opacity:.7}
+.realz-card svg.rzx .provlab{fill:#bbb;font-size:9px;text-anchor:middle}
+.realz-card svg.rzx .endlab{font-size:10px;font-weight:600}
+.realz-card table.rzx-tbl{width:100%;border-collapse:collapse;margin-top:8px;font-variant-numeric:tabular-nums}
+.realz-card .rzx-tbl th,.realz-card .rzx-tbl td{padding:4px 6px;text-align:center;font-size:11px;border-bottom:0.5px solid #efeef5;white-space:nowrap}
+.realz-card .rzx-tbl th{color:#888;font-weight:600;background:#fafafa}
+.realz-card .rzx-tbl th.l,.realz-card .rzx-tbl td.l{text-align:left;color:#555;font-weight:600}
+.realz-card .rzx-tbl td.nc{color:#C0392B}
+.realz-card .rzx-tbl td.pc{color:#1a7a4a}
+.realz-card .rzx-tbl .prov{background:#faf7fb;color:#a0468a}
+/* Monthly trend card (class-scoped) */
+.realz-monthly-card .rzm-callout{background:#fdf6f5;border:0.5px solid #f0d7d3;border-left:4px solid #C0392B;border-radius:6px;padding:10px 14px;margin:4px 0 12px;font-size:12.5px;line-height:1.5;color:#333}
+.realz-monthly-card .rzm-callout b{color:#1F3864}
+.realz-monthly-card .rzm-wrap{margin:6px 0 14px}
+.realz-monthly-card .rzm-nodata{font-size:12px;color:#999;font-style:italic;padding:18px 0}
+.realz-monthly-card svg.trend{width:100%;height:auto;display:block}
+.realz-monthly-card svg.trend .grid{stroke:#eee;stroke-width:1}
+.realz-monthly-card svg.trend .ylab{fill:#aaa;font-size:10px;text-anchor:end}
+.realz-monthly-card svg.trend .xlab{fill:#888;font-size:11px;text-anchor:middle}
+.realz-monthly-card svg.trend .ln{fill:none;stroke-width:2.4}
+.realz-monthly-card svg.trend .lndash{stroke-width:2.2;stroke-dasharray:4 3;opacity:.55}
+.realz-monthly-card svg.trend .gap{fill:#C0392B;opacity:.09}
+.realz-monthly-card svg.trend .provband{fill:#f7f7f7;opacity:.7}
+.realz-monthly-card svg.trend .provlab{fill:#bbb;font-size:9.5px;text-anchor:middle}
+.realz-monthly-card svg.trend .endlab{font-size:11px;font-weight:600}
+.realz-monthly-card .rzm-key{display:flex;gap:18px;font-size:11px;color:#666;margin-top:4px;padding-left:52px}
+.realz-monthly-card .rzm-key i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+.realz-monthly-card .rzm-key i.gapkey{height:10px;background:#C0392B;opacity:.18}
+.realz-monthly-card table.rzm-tbl{width:100%;border-collapse:collapse;margin-bottom:6px}
+.realz-monthly-card .rzm-tbl th{padding:7px 8px;font-size:10px;font-weight:600;color:#666;border-bottom:1.5px solid #ddd;text-align:center;white-space:nowrap;background:#fafafa}
+.realz-monthly-card .rzm-tbl th.l{text-align:left}
+.realz-monthly-card .rzm-tbl td{padding:7px 8px;text-align:center;font-size:12px;border-bottom:0.5px solid #f0f0f0;font-variant-numeric:tabular-nums}
+.realz-monthly-card .rzm-tbl td.l{text-align:left;font-weight:600;color:#222;font-variant-numeric:normal;white-space:nowrap}
+.realz-monthly-card .rzm-tbl td.nc{color:#C0392B}
+.realz-monthly-card .rzm-tbl td.pc{color:#1a7a4a}
+.realz-monthly-card .rzm-h tr.ctxrow td{color:#999;background:#fbfbfb;font-size:11px}
+.realz-monthly-card .rzm-h .prov{background:#faf7fb;color:#a0468a}
+.realz-monthly-card .sk-head{font-size:11px;font-weight:600;color:#1F3864;margin:8px 0;padding-top:10px;border-top:0.5px solid #eee}
+.realz-monthly-card .sk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px}
+.realz-monthly-card .sk{border:0.5px solid #eee;border-radius:6px;padding:6px 8px}
+.realz-monthly-card .sk-l{font-size:10.5px;font-weight:600;color:#444;margin-bottom:2px}
+.realz-monthly-card svg.spark{width:100%;height:30px;display:block;overflow:visible}
 /* Tab 4 — Data Summary (metric-major: office totals + per-metric explode) */
 #tab4{
   --t4-line:#e2e8f0;--t4-ink:#1f2a44;--t4-soft:#5a6b85;--t4-faint:#94a3b8;--t4-zebra:#f5f8fc;
@@ -465,6 +1159,19 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 #tab5 .t5anchor .t5awin{display:block;font-size:9px;color:var(--t5-faint);font-weight:600;letter-spacing:.3px;text-transform:none}
 #tab5 .t5anchor .t5asub{font-size:10px;color:var(--t5-faint);font-style:italic;border-top:0.5px dashed var(--t5-line);padding-top:5px;margin-top:1px}
 #tab5 .t5momtd{font-weight:700;font-size:8px;color:var(--t5-faint)}
+/* View 2 — dollar detail block in the procedure expand (realization-led) */
+#tab5 .t5dol{padding-bottom:6px}
+#tab5 .t5dolh{display:flex;align-items:center;gap:10px}
+#tab5 .t5dtag{font-size:9px;font-weight:700;letter-spacing:.3px;padding:1px 7px;border-radius:4px;text-transform:none}
+#tab5 .t5dtag.t5dbad{background:var(--t5-down-bg);color:var(--t5-down)}
+#tab5 .t5dtag.t5dwarn{background:#fbeede;color:#b45309}
+#tab5 .t5dtag.t5dgood{background:var(--t5-up-bg);color:var(--t5-up)}
+#tab5 .t5dtag.t5dmut{background:#eef2f6;color:var(--t5-faint)}
+#tab5 table.t5doltbl{max-width:560px}
+#tab5 table.t5doltbl tr.t5dollead td{background:#eef3fb;font-weight:600}
+#tab5 table.t5doltbl tr.t5dollead td.l{color:var(--t5-navy)}
+#tab5 table.t5doltbl tr.t5dolctrl td{color:var(--t5-faint);background:#fbfbfc}
+#tab5 table.t5doltbl .t5dctl{font-size:8px;text-transform:uppercase;letter-spacing:.3px;color:var(--t5-faint);border:0.5px solid var(--t5-line);border-radius:3px;padding:0 3px;margin-left:4px}
 #tab5 .t5intro>div{margin-bottom:3px}
 #tab5 .t5intro>div:last-child{margin-bottom:0}
 @media(max-width:880px){#tab5 .t5band{flex-direction:column;align-items:flex-start;gap:4px}#tab5 .t5band .note{text-align:left}#tab5 table.t5tbl,#tab5 .t5dwrap{display:block;overflow-x:auto}}
@@ -484,7 +1191,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
   <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Doctor Rank View</button>
   <button class="nav-tab" id="navTab4" onclick="switchTab(4)">&#128203; Data Summary</button>
-  <button class="nav-tab" id="navTab5" onclick="switchTab(5)">&#128138; Mix Shift</button>
+  <button class="nav-tab" id="navTab5" onclick="switchTab(5)">&#128138; Mix Shift</button>__REALIZATION_NAVTAB__
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -752,6 +1459,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   </div>
 </div>
 
+__REALIZATION_TAB__
 <div class="footer">Generated from source data &mdash; __RANGE__ &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
 </div>
 
@@ -1573,6 +2281,7 @@ function t4Bind(){
 // Build-1 mix_dataset payload — benchmarks rendered as-is, nothing locked recomputed)
 // ══════════════════════════════════════════════════════════════════════════════
 var MIX=__MIX_DATA__;
+var MIXDOLLARS=__MIX_DOLLARS_DATA__;   // View 2: per-(office,provider,group) dollar detail (closed Jan–May, corrected $)
 var MG=(MIX.meta&&MIX.meta.groups)||[];        // procedure groups, canonical order (9 tracked + Other)
 var MYT=(MIX.meta&&MIX.meta.active_months.length)||MO.length;  // YTD index in per100/visits arrays
 var T5_INACTIVE_FRAC=0.05;   // 2026 YTD visits below this fraction of 2025 → activity label (tunable)
@@ -1747,7 +2456,7 @@ function t5Compact(office,prov){
       +'<td class="num mx">'+(inactive?'<span class="t5muted">&mdash;</span>':t5f1(b))+'</td>'
       +'<td class="num mx">'+(inactive?'<span class="t5vs">&mdash;</span>':t5Delta(b,a))+'</td>'
       +'<td class="num t5vs vsep">'+t5f1(co)+(inactive?'':' '+t5Vs(b,co))+'</td></tr>';
-    s+='<tr class="t5detail" style="display:none"><td colspan="8">'+t5Month(rec,g,st)+'</td></tr>';
+    s+='<tr class="t5detail" style="display:none"><td colspan="8">'+t5Dollars(office,prov,g)+t5Month(rec,g,st)+'</td></tr>';
     return s+'</tbody>';
   }
   var body='';
@@ -1762,6 +2471,37 @@ function t5Compact(office,prov){
     +'<tr><th>2025</th><th>2026</th><th class="vsep">&Delta;</th><th class="mx vsep">2025</th><th class="mx">2026</th><th class="mx">&Delta;</th></tr></thead>';
   var band='<div class="t5band"><div class="who">'+prov+' <small>'+office.replace(/&/g,'&amp;')+(rec.state?' &middot; '+rec.state:'')+(role?' &middot; '+role:'')+'</small></div><div class="note">volume '+T5_VOLWIN+' &middot; per 100 visits '+T5_MIXWIN+' &middot; biggest volume move first &middot; click to expand</div></div>';
   return t5Anchor(rec.visits.y1,rec.visits.y2,rec.counts)+band+note+'<table class="t5tbl">'+thead+body+'</table>'+T5_CAP;
+}
+
+// ③a EXPANDED — DOLLAR detail for one procedure (View 2). Realization leads (write-off
+// rate + net/proc); gross is the muted control. Closed Jan–May matched window, corrected $.
+var T5_DOLTAG={collecting:['Collecting less','t5dbad'],billing:['Billing less','t5dwarn'],
+  both:['Both','t5dbad'],mix:['Mixed','t5dmut'],
+  masked:['Realization &darr; &mdash; masked by gross','t5dwarn'],up:['Realization held','t5dgood']};
+function t5dPct(x){return (x==null)?'<span class="t5muted">&mdash;</span>':(x*100).toFixed(1)+'%';}
+function t5dPpt(x){if(x==null)return '<span class="t5muted">&mdash;</span>';
+  var up=x>0;return '<span class="'+(up?'t5down':(x<0?'t5up':''))+'">'+(up?'+':(x<0?'&minus;':''))+Math.abs(x*100).toFixed(1)+' pt</span>';}
+function t5dMoney(x){return (x==null)?'<span class="t5muted">&mdash;</span>':'$'+Math.round(x).toLocaleString();}
+function t5dDelMoney(x){if(x==null)return '<span class="t5muted">&mdash;</span>';
+  var up=x>=0;return '<span class="'+(up?'t5up':'t5down')+'">'+(up?'+':'&minus;')+'$'+Math.abs(Math.round(x)).toLocaleString()+'</span>';}
+function t5Dollars(office,prov,g){
+  var m=((MIXDOLLARS[office]||{})[prov]||{})[g];
+  if(!m)return '';   // no procedures in window -> no dollar block (honest absence)
+  var tg=T5_DOLTAG[m.tag]||['&mdash;','t5dmut'];
+  // Δ written-off worse (positive) = red; net/proc down = red. Gross row muted as control.
+  return '<div class="t5dwrap t5dol">'
+    +'<div class="t5dh t5dolh">Dollars &mdash; realization &middot; closed '+T5_VOLWIN+' &middot; corrected $ '
+      +'<span class="t5dtag '+tg[1]+'">'+tg[0]+'</span></div>'
+    +'<table class="t5mo t5doltbl"><thead><tr><th class="l">Per procedure</th><th>2025</th><th>2026</th><th>&Delta;</th></tr></thead><tbody>'
+    +'<tr class="t5dollead"><td class="l">% written off (Adj &divide; Gross) &mdash; <b>leads</b></td>'
+      +'<td class="num">'+t5dPct(m.wo1)+'</td><td class="num">'+t5dPct(m.wo2)+'</td><td class="num">'+t5dPpt(m.dwo)+'</td></tr>'
+    +'<tr><td class="l">Net / procedure</td>'
+      +'<td class="num">'+t5dMoney(m.np1)+'</td><td class="num">'+t5dMoney(m.np2)+'</td><td class="num">'+t5dDelMoney(m.dnp)+'</td></tr>'
+    +'<tr class="t5dolctrl"><td class="l">Gross / procedure <span class="t5dctl">control</span></td>'
+      +'<td class="num">'+t5dMoney(m.gp1)+'</td><td class="num">'+t5dMoney(m.gp2)+'</td><td class="num">'+t5dDelMoney(m.dgp)+'</td></tr>'
+    +'<tr class="t5dolctrl"><td class="l">Net $ &middot; '+Math.round(m.c1).toLocaleString()+' &rarr; '+Math.round(m.c2).toLocaleString()+' procs</td>'
+      +'<td class="num">'+t5dMoney(m.n1)+'</td><td class="num">'+t5dMoney(m.n2)+'</td><td class="num">'+t5dDelMoney((m.n2!=null&&m.n1!=null)?m.n2-m.n1:null)+'</td></tr>'
+    +'</tbody></table></div>';
 }
 
 // ③ EXPANDED — monthly shape for one procedure: provider / state / company, 2025 & 2026
@@ -1837,11 +2577,32 @@ function switchTab(n){
   document.getElementById('tab3').style.display=n===3?'':'none';
   document.getElementById('tab4').style.display=n===4?'':'none';
   document.getElementById('tab5').style.display=n===5?'':'none';
+  var _t6=document.getElementById('tab6'); if(_t6){_t6.style.display=n===6?'':'none';}
   document.getElementById('navTab1').className='nav-tab'+(n===1?' on':'');
   document.getElementById('navTab2').className='nav-tab'+(n===2?' on':'');
   document.getElementById('navTab3').className='nav-tab'+(n===3?' on':'');
   document.getElementById('navTab4').className='nav-tab'+(n===4?' on':'');
   document.getElementById('navTab5').className='nav-tab'+(n===5?' on':'');
+  var _n6=document.getElementById('navTab6'); if(_n6){_n6.className='nav-tab'+(n===6?' on':'');}
+}
+
+// Realization tab office slicer — show the selected pre-rendered pane (table + KPIs +
+// intro + monthly trend all switch together). No-op if the tab isn't present.
+function realzPick(v){
+  var panes=document.querySelectorAll('.realz-pane');
+  for(var i=0;i<panes.length;i++){panes[i].style.display='none';}
+  var sel=document.getElementById('rzpane-'+v);
+  if(sel){sel.style.display='';}
+}
+// Realization YoY-table row -> reveal that procedure's monthly Net/proc explode. The
+// explode row is pre-rendered as the row's next sibling within THIS pane, so it already
+// carries the selected office's data (re-scopes with the slicer for free).
+function rzToggle(tr){
+  var ex=tr.nextElementSibling;
+  if(!ex||!ex.classList.contains('rz-exp')){return;}
+  var show=ex.style.display==='none';
+  ex.style.display=show?'':'none';
+  tr.classList.toggle('rz-open',show);
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────

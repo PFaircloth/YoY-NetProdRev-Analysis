@@ -5,6 +5,7 @@ from datetime import datetime
 import config
 from pipeline import build_office_data, build_provider_data, build_data_summary, build_consolidated
 from mix_pipeline import build_mix_dataset
+from mix_dollars import build_dollar_dataset
 from report import generate_html
 
 _OUTPUT_DIR = os.path.dirname(config.OUTPUT_FILE)
@@ -35,6 +36,7 @@ def main():
     provider_data = build_provider_data()
     data_summary  = build_data_summary()
     mix_dataset   = build_mix_dataset()[0]   # verified Build-1 mix data layer (consume only)
+    dollar_dataset = build_dollar_dataset()[0]  # verified procedure-dollar layer (dormant; Phase 2 placement pending)
     consolidated  = build_consolidated()     # company-total pinned row (ties to KPI cards)
 
     named_offices   = [o for o in office_data if not o["is_other"]]
@@ -51,7 +53,8 @@ def main():
           f"(Δ {cons_fin['drd']:,.0f})")
 
     print("Generating HTML report…")
-    html = generate_html(office_data, provider_data, data_summary, mix_dataset, consolidated)
+    html = generate_html(office_data, provider_data, data_summary, mix_dataset, consolidated,
+                         dollar_dataset=dollar_dataset)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
