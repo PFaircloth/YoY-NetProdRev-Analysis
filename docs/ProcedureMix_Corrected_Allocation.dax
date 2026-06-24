@@ -1,0 +1,236 @@
+// ============================================================================
+// Procedure Mix — CORRECTED per-row proportional adjustment allocation
+// Power BI / DAX query   (replaces the global-rate allocation)
+// Grain:  dim_office[display_office] x dim_provider[full_name] x dim_date month
+// ============================================================================
+//
+// WHAT CHANGED vs the current query
+// ---------------------------------
+// The current query allocates adjustments with a SINGLE company-wide rate, e.g.:
+//     VAR GlobalAdjRate = DIVIDE ( [Total Adj], [Total Gross Prod] )   -- computed ONCE
+//     <Proc> Adj $      = [<Proc> Gross $] * GlobalAdjRate
+// Because that VAR is evaluated once over the whole result set (not per row),
+// EVERY office/provider/month gets the same ~ -13.8% rate regardless of its real
+// adjustment rate. That overstates net at high-write-off offices (oral surgery
+// runs ~ -46%) and understates it at low/negative-adjustment offices. It nets out
+// company-wide, so the grand total looks fine, but every office row is wrong.
+//
+// THE FIX -- allocate each ROW's OWN [Total Adj] in proportion to each procedure's
+// share of that SAME row's gross. Do NOT use a global VAR: reference the measures
+// [Total Adj] and [Total Gross Prod], which re-evaluate inside each row's filter
+// context (office x provider x month) created by SUMMARIZECOLUMNS:
+//
+//     <Proc> Adj $ Corrected = [Total Adj] * DIVIDE ( [<Proc> Gross $], [Total Gross Prod] )
+//     <Proc> Net $ Corrected = [<Proc> Gross $] + [<Proc> Adj $ Corrected]
+//
+// Because SUM of the 14 procedure gross values = [Total Gross Prod] for every row,
+// the corrected procedure adjustments sum back to [Total Adj], and the corrected
+// procedure net sums to [Total Net Prod] -- exactly (validated to $0.00 in File V2).
+//
+// ZERO-GROSS ROWS -- a month with adjustments but no gross production (refunds /
+// write-offs of prior-period production) has no gross to allocate against. Those
+// rows get 0 for every procedure and their [Total Adj] is captured by the
+// [Unallocated Adj $] measure so nothing is lost. (File V2: -$1,616,575.35 of
+// adjustment across 3,780 such rows.)
+//
+// PORTING NOTE -- replace every placeholder marked  <<< ... >>>  with your model's
+// real table / column names. Only the Adj $ and Net $ logic is new; Count and
+// Gross $ are unchanged from the working model (gross already ties to source).
+// ============================================================================
+
+DEFINE
+
+    // ========================================================================
+    // HEADER / ROW-TOTAL MEASURES  (each re-evaluates per office x provider x month)
+    // ========================================================================
+
+    // Gross production = procedure charge lines only
+    MEASURE 'Fact'[Total Gross Prod] =
+        CALCULATE (
+            SUM ( 'Fact'[Amount] ),                                  // <<< your $ amount column >>>
+            KEEPFILTERS ( 'Fact'[transaction_type] IN { "Procedure", "Charges(Procedure Codes)" } )
+        )
+
+    // Adjustments (carry their own sign; reductions are negative)
+    MEASURE 'Fact'[Total Adj] =
+        CALCULATE (
+            SUM ( 'Fact'[Amount] ),
+            KEEPFILTERS ( 'Fact'[transaction_type] IN { "Adjustment", "Production-Deleted S", "other_balances" } )
+        )
+
+    // Net = gross + adjustments (adjustments already signed, so add)
+    MEASURE 'Fact'[Total Net Prod] = [Total Gross Prod] + [Total Adj]
+
+    // Visits -- distinct appointment/visit key on the procedure charge lines
+    MEASURE 'Fact'[Total Visits] =
+        CALCULATE (
+            DISTINCTCOUNT ( 'Fact'[visit_id] ),                      // <<< your visit grain >>>
+            KEEPFILTERS ( 'Fact'[transaction_type] IN { "Procedure", "Charges(Procedure Codes)" } )
+        )
+
+    // Adjustment that CANNOT be proportionally allocated (rows with zero gross).
+    // Carried explicitly so the company total still ties:
+    //   SUM(all procedure Net $ Corrected) + SUM(Unallocated Adj $) = SUM(Total Net Prod)
+    MEASURE 'Fact'[Unallocated Adj $] =
+        IF ( [Total Gross Prod] = 0, [Total Adj], 0 )
+
+    // ========================================================================
+    // PER-PROCEDURE BASE  (Count + Gross $ are UNCHANGED from the current model)
+    // ------------------------------------------------------------------------
+    // The procedure is identified by your procedure-group classification, shown
+    // here as  <<< dim_procedure[procedure_group] >>>  -- the group string must
+    // match the model's classification. Output column names follow File V2.
+    // "Other" is the residual bucket: all procedure charges NOT in the 13 named
+    // groups (use your existing Other classification).
+    // ========================================================================
+
+    // reusable procedure-count base (one "procedure performed" per the model's grain)
+    MEASURE 'Fact'[Procedure Count] =
+        CALCULATE (
+            DISTINCTCOUNT ( 'Fact'[procedure_instance_id] ),         // <<< your count grain >>>
+            KEEPFILTERS ( 'Fact'[transaction_type] IN { "Procedure", "Charges(Procedure Codes)" } )
+        )
+
+    // ---- 1. CROWN  (FULLY COMMENTED -- the other 13 follow this exact shape) ----
+    MEASURE 'Fact'[Crown Count] =
+        CALCULATE ( [Procedure Count], KEEPFILTERS ( dim_procedure[procedure_group] = "Crown" ) )
+
+    MEASURE 'Fact'[Crown Gross $] =
+        CALCULATE ( [Total Gross Prod], KEEPFILTERS ( dim_procedure[procedure_group] = "Crown" ) )
+
+    MEASURE 'Fact'[Crown Adj $ Corrected] =
+        // this ROW's Total Adj  x  Crown's share of this ROW's Total Gross.
+        // [Total Adj] and [Total Gross Prod] are NOT procedure-filtered here, so
+        // they return the row's totals; [Crown Gross $] is the Crown slice.
+        IF (
+            [Total Gross Prod] = 0,
+            0,                                                       // zero-gross -> see Unallocated Adj $
+            [Total Adj] * DIVIDE ( [Crown Gross $], [Total Gross Prod] )
+        )
+
+    MEASURE 'Fact'[Crown Net $ Corrected] =
+        COALESCE ( [Crown Gross $], 0 ) + [Crown Adj $ Corrected]
+
+    // ---- 2. BONE GRAFT ----
+    MEASURE 'Fact'[Bone Graft Count]         = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Bone Graft" ) )
+    MEASURE 'Fact'[Bone Graft Gross $]       = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Bone Graft" ) )
+    MEASURE 'Fact'[Bone Graft Adj $ Corrected] = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Bone Graft Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Bone Graft Net $ Corrected] = COALESCE ( [Bone Graft Gross $], 0 ) + [Bone Graft Adj $ Corrected]
+
+    // ---- 3. EXTRACTION ----
+    MEASURE 'Fact'[Extraction Count]         = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Extraction" ) )
+    MEASURE 'Fact'[Extraction Gross $]       = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Extraction" ) )
+    MEASURE 'Fact'[Extraction Adj $ Corrected] = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Extraction Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Extraction Net $ Corrected] = COALESCE ( [Extraction Gross $], 0 ) + [Extraction Adj $ Corrected]
+
+    // ---- 4. IMPLANT ----
+    MEASURE 'Fact'[Implant Count]            = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Implant" ) )
+    MEASURE 'Fact'[Implant Gross $]          = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Implant" ) )
+    MEASURE 'Fact'[Implant Adj $ Corrected]  = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Implant Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Implant Net $ Corrected]  = COALESCE ( [Implant Gross $], 0 ) + [Implant Adj $ Corrected]
+
+    // ---- 5. DENTURE ----
+    MEASURE 'Fact'[Denture Count]            = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Denture" ) )
+    MEASURE 'Fact'[Denture Gross $]          = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Denture" ) )
+    MEASURE 'Fact'[Denture Adj $ Corrected]  = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Denture Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Denture Net $ Corrected]  = COALESCE ( [Denture Gross $], 0 ) + [Denture Adj $ Corrected]
+
+    // ---- 6. BRIDGE ----
+    MEASURE 'Fact'[Bridge Count]             = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Bridge" ) )
+    MEASURE 'Fact'[Bridge Gross $]           = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Bridge" ) )
+    MEASURE 'Fact'[Bridge Adj $ Corrected]   = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Bridge Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Bridge Net $ Corrected]   = COALESCE ( [Bridge Gross $], 0 ) + [Bridge Adj $ Corrected]
+
+    // ---- 7. FOUR SURFACE FILLING ----
+    MEASURE 'Fact'[Four Surface Filling Count]         = CALCULATE ( [Procedure Count],  KEEPFILTERS ( dim_procedure[procedure_group] = "Four Surface Filling" ) )
+    MEASURE 'Fact'[Four Surface Filling Gross $]       = CALCULATE ( [Total Gross Prod], KEEPFILTERS ( dim_procedure[procedure_group] = "Four Surface Filling" ) )
+    MEASURE 'Fact'[Four Surface Filling Adj $ Corrected] = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Four Surface Filling Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Four Surface Filling Net $ Corrected] = COALESCE ( [Four Surface Filling Gross $], 0 ) + [Four Surface Filling Adj $ Corrected]
+
+    // ---- 8. AMALGAM ----
+    MEASURE 'Fact'[Amalgam Count]            = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Amalgam" ) )
+    MEASURE 'Fact'[Amalgam Gross $]          = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Amalgam" ) )
+    MEASURE 'Fact'[Amalgam Adj $ Corrected]  = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Amalgam Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Amalgam Net $ Corrected]  = COALESCE ( [Amalgam Gross $], 0 ) + [Amalgam Adj $ Corrected]
+
+    // ---- 9. FILLING ----
+    MEASURE 'Fact'[Filling Count]            = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Filling" ) )
+    MEASURE 'Fact'[Filling Gross $]          = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Filling" ) )
+    MEASURE 'Fact'[Filling Adj $ Corrected]  = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Filling Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Filling Net $ Corrected]  = COALESCE ( [Filling Gross $], 0 ) + [Filling Adj $ Corrected]
+
+    // ---- 10. ANT BICUSPID ENDO  (Anterior & Bicuspid Endo) ----
+    MEASURE 'Fact'[Ant Bicuspid Endo Count]         = CALCULATE ( [Procedure Count],  KEEPFILTERS ( dim_procedure[procedure_group] = "Ant Bicuspid Endo" ) )
+    MEASURE 'Fact'[Ant Bicuspid Endo Gross $]       = CALCULATE ( [Total Gross Prod], KEEPFILTERS ( dim_procedure[procedure_group] = "Ant Bicuspid Endo" ) )
+    MEASURE 'Fact'[Ant Bicuspid Endo Adj $ Corrected] = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Ant Bicuspid Endo Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Ant Bicuspid Endo Net $ Corrected] = COALESCE ( [Ant Bicuspid Endo Gross $], 0 ) + [Ant Bicuspid Endo Adj $ Corrected]
+
+    // ---- 11. MOLAR ENDO ----
+    MEASURE 'Fact'[Molar Endo Count]         = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Molar Endo" ) )
+    MEASURE 'Fact'[Molar Endo Gross $]       = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Molar Endo" ) )
+    MEASURE 'Fact'[Molar Endo Adj $ Corrected] = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Molar Endo Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Molar Endo Net $ Corrected] = COALESCE ( [Molar Endo Gross $], 0 ) + [Molar Endo Adj $ Corrected]
+
+    // ---- 12. ORTHO STARTS ----
+    MEASURE 'Fact'[Ortho Starts Count]       = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Ortho Starts" ) )
+    MEASURE 'Fact'[Ortho Starts Gross $]     = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Ortho Starts" ) )
+    MEASURE 'Fact'[Ortho Starts Adj $ Corrected] = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Ortho Starts Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Ortho Starts Net $ Corrected] = COALESCE ( [Ortho Starts Gross $], 0 ) + [Ortho Starts Adj $ Corrected]
+
+    // ---- 13. ROOT CANAL ----
+    MEASURE 'Fact'[Root Canal Count]         = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Root Canal" ) )
+    MEASURE 'Fact'[Root Canal Gross $]       = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Root Canal" ) )
+    MEASURE 'Fact'[Root Canal Adj $ Corrected] = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Root Canal Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Root Canal Net $ Corrected] = COALESCE ( [Root Canal Gross $], 0 ) + [Root Canal Adj $ Corrected]
+
+    // ---- 14. OTHER  (residual: all procedure charges NOT in the 13 named groups) ----
+    MEASURE 'Fact'[Other Count]              = CALCULATE ( [Procedure Count],   KEEPFILTERS ( dim_procedure[procedure_group] = "Other" ) )
+    MEASURE 'Fact'[Other Gross $]            = CALCULATE ( [Total Gross Prod],  KEEPFILTERS ( dim_procedure[procedure_group] = "Other" ) )
+    MEASURE 'Fact'[Other Adj $ Corrected]    = IF ( [Total Gross Prod] = 0, 0, [Total Adj] * DIVIDE ( [Other Gross $], [Total Gross Prod] ) )
+    MEASURE 'Fact'[Other Net $ Corrected]    = COALESCE ( [Other Gross $], 0 ) + [Other Adj $ Corrected]
+
+// ============================================================================
+// OUTPUT
+// ============================================================================
+EVALUATE
+SUMMARIZECOLUMNS (
+    dim_office[display_office],
+    dim_provider[full_name],
+    dim_provider[uniform_name],
+    dim_date[Date(yyyy-mm)],
+
+    // date window: January 2025 onward.
+    // (If Date(yyyy-mm) is a TEXT column, compare to "2025-01" instead of DATE().)
+    KEEPFILTERS ( FILTER ( ALL ( dim_date[Date(yyyy-mm)] ), dim_date[Date(yyyy-mm)] >= DATE ( 2025, 1, 1 ) ) ),
+
+    // ---- header summary metrics ----
+    "Total Visits",        [Total Visits],
+    "Total Gross Prod",    [Total Gross Prod],
+    "Total Adj",           [Total Adj],
+    "Total Net Prod",      [Total Net Prod],
+    "Unallocated Adj $",   [Unallocated Adj $],
+
+    // ---- per procedure: Count | Gross $ | Adj $ Corrected | Net $ Corrected ----
+    "Bone Graft Count", [Bone Graft Count], "Bone Graft Gross $", [Bone Graft Gross $], "Bone Graft Adj $ Corrected", [Bone Graft Adj $ Corrected], "Bone Graft Net $ Corrected", [Bone Graft Net $ Corrected],
+    "Extraction Count", [Extraction Count], "Extraction Gross $", [Extraction Gross $], "Extraction Adj $ Corrected", [Extraction Adj $ Corrected], "Extraction Net $ Corrected", [Extraction Net $ Corrected],
+    "Implant Count", [Implant Count], "Implant Gross $", [Implant Gross $], "Implant Adj $ Corrected", [Implant Adj $ Corrected], "Implant Net $ Corrected", [Implant Net $ Corrected],
+    "Crown Count", [Crown Count], "Crown Gross $", [Crown Gross $], "Crown Adj $ Corrected", [Crown Adj $ Corrected], "Crown Net $ Corrected", [Crown Net $ Corrected],
+    "Denture Count", [Denture Count], "Denture Gross $", [Denture Gross $], "Denture Adj $ Corrected", [Denture Adj $ Corrected], "Denture Net $ Corrected", [Denture Net $ Corrected],
+    "Bridge Count", [Bridge Count], "Bridge Gross $", [Bridge Gross $], "Bridge Adj $ Corrected", [Bridge Adj $ Corrected], "Bridge Net $ Corrected", [Bridge Net $ Corrected],
+    "Four Surface Filling Count", [Four Surface Filling Count], "Four Surface Filling Gross $", [Four Surface Filling Gross $], "Four Surface Filling Adj $ Corrected", [Four Surface Filling Adj $ Corrected], "Four Surface Filling Net $ Corrected", [Four Surface Filling Net $ Corrected],
+    "Amalgam Count", [Amalgam Count], "Amalgam Gross $", [Amalgam Gross $], "Amalgam Adj $ Corrected", [Amalgam Adj $ Corrected], "Amalgam Net $ Corrected", [Amalgam Net $ Corrected],
+    "Filling Count", [Filling Count], "Filling Gross $", [Filling Gross $], "Filling Adj $ Corrected", [Filling Adj $ Corrected], "Filling Net $ Corrected", [Filling Net $ Corrected],
+    "Ant Bicuspid Endo Count", [Ant Bicuspid Endo Count], "Ant Bicuspid Endo Gross $", [Ant Bicuspid Endo Gross $], "Ant Bicuspid Endo Adj $ Corrected", [Ant Bicuspid Endo Adj $ Corrected], "Ant Bicuspid Endo Net $ Corrected", [Ant Bicuspid Endo Net $ Corrected],
+    "Molar Endo Count", [Molar Endo Count], "Molar Endo Gross $", [Molar Endo Gross $], "Molar Endo Adj $ Corrected", [Molar Endo Adj $ Corrected], "Molar Endo Net $ Corrected", [Molar Endo Net $ Corrected],
+    "Ortho Starts Count", [Ortho Starts Count], "Ortho Starts Gross $", [Ortho Starts Gross $], "Ortho Starts Adj $ Corrected", [Ortho Starts Adj $ Corrected], "Ortho Starts Net $ Corrected", [Ortho Starts Net $ Corrected],
+    "Root Canal Count", [Root Canal Count], "Root Canal Gross $", [Root Canal Gross $], "Root Canal Adj $ Corrected", [Root Canal Adj $ Corrected], "Root Canal Net $ Corrected", [Root Canal Net $ Corrected],
+    "Other Count", [Other Count], "Other Gross $", [Other Gross $], "Other Adj $ Corrected", [Other Adj $ Corrected], "Other Net $ Corrected", [Other Net $ Corrected]
+)
+
+// ============================================================================
+// VALIDATION (run after import; all four passed on File V2 -- see methodology note)
+//   1. SUM(procedure Gross $)                         = [Total Gross Prod]   (every row)
+//   2. SUM(procedure Net $ Corrected)                 = [Total Net Prod]     (gross > 0 rows)
+//   3. SUM(procedure Adj $ Corrected) + Unallocated Adj $ = [Total Adj]      (every row)
+//   4. SUM(Total Net Prod) company-wide               = $216,099,290
+// ============================================================================

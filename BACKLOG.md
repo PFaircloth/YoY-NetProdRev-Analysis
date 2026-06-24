@@ -1,5 +1,59 @@
 # Backlog
 
+## ⭐ CRITICAL (after Phase 2) — INTERPRETATION LAYER: guided $7.6M-drop diagnosis
+
+**Priority:** critical / high-value — likely the highest-leverage remaining build. It turns
+a collection of views into a guided *methodology*. **Do AFTER Phase 2** (realization view)
+is complete, so it points at a finished view-set.
+
+**Two presentations of one diagnosis — same workstream:**
+- **(A) Decision Tree** = *how to investigate* (the branching elimination logic).
+- **(B) Summary / Takeaways tab** = *what we found* (plain-language synthesis).
+
+They are twins: same diagnosis, the tree teaches the path, the summary states the verdict.
+Build together so they can't drift apart.
+
+### (B) Summary / Takeaways tab — plain-language synthesis of the diagnosis
+A standalone tab that states the conclusion in plain language: the two levers that moved,
+each with a one-line "why" and a drill-link to the view that proves it, PLUS an explicit
+**"NOT the cause:"** line (mix / intensity / pricing / capacity — what we ruled out). The
+audience reads this first to get the answer; the tree and views are where they verify it.
+- **CRITICAL — numbers MUST derive from the live data, not hardcoded sentences.** Every
+  figure ($7.6M drop, $/Visit Δ, +2.1 pt realization, the "not the cause" magnitudes) must
+  read from the pipeline/payload at build time, so it can never go stale-literal as months
+  refresh. No baked-in prose numbers.
+- Twin of the decision tree (tree = how to investigate, summary = what we found).
+
+### (A) Decision Tree — guided investigation framework
+
+**What:** A guide that hand-holds the audience through HOW to navigate the revenue-drop
+investigation — externalizing the diagnostic *reasoning*, not just presenting views. Starts
+at the **$7.6M YoY drop** and branches step-by-step; each node names the report view that
+answers that question.
+
+**Why:** We have the VIEWS (consolidated lever card, Mix Shift, Procs/Visit intensity,
+realization diagnostic). What's missing is the connective REASONING — which question to ask
+first, and what to do with each answer — which currently lives only in analysis sessions.
+The tree externalizes it so the next person (or future-self) can run the diagnosis without
+rediscovering the path.
+
+**Shape (the elimination logic we actually used):**
+- **Step 1** — decompose Rev/Day into levers (consolidated lever card): which lever moved?
+  (Rev/Day = $/Visit × Visits/DrDay × DrDays/Day)
+- **Branch A — Vis/DrDay:** volume vs intensity (Procs/Visit). If volume → where
+  (hygiene/Other categories) → new-patient/recall → **demand/acquisition problem (front office)**.
+- **Branch B — $/Visit:** billing-less vs collecting-less (gross/proc vs adjustment rate).
+  Realization erosion (+2.1 pts company-wide, gross holding) → **revenue-cycle/payer problem**.
+
+**Requirements / cautions:**
+- Must map genuine **BRANCHES**, not retell our one path — handle cases where the answer
+  differs (intensity DID drop, pricing WAS the issue, etc.). The value is in the branching,
+  not the narration.
+- **Navigation layer only** — routes to the views, does NOT reproduce/duplicate the data
+  (avoid a parallel artifact that drifts out of sync).
+- Start with a **STATIC decision-tree document** (format #1); assess whether an interactive
+  guided version is worth building afterward.
+
 ## Phase 3 — Unified YoY + Forecast Dashboard
 
 **Concept:** Combine the YoY-NetProdRev-Analysis and forecast-model pipelines 
@@ -135,6 +189,18 @@ Recommend dedicated project sprint.
     one year; currently handled by the year-intersection month window, but a validator
     should surface per-month/per-year row-count gaps explicitly rather than letting them
     vanish silently.
+  - **Mix source (DAX) emits MALFORMED count-column headers — ask data source to fix the
+    export.** The procedure-mix extract (V/V2 re-pulls) exports the 14 bare COUNT measures
+    with a trailing space and **no closing bracket** — `'[Crown '`, `'[Bone Graft '`, … —
+    while every suffixed dollar column is properly bracketed (`[Crown Gross $]`, etc.). The
+    clean codebase expects the proper `[Crown]` form (`mix_pipeline.PROC_GROUPS`), so the V2
+    promotion required a one-time **header-normalization step** (rename the 14 bare counts
+    `'[Crown ' → [Crown]` before writing canonical `data/X. DAX_ProcedureMix.xlsx`; dollar
+    columns and keys left untouched). **Request to the data source:** fix the DAX export so
+    future pulls emit clean bracketed count names — then this normalization step disappears
+    and promotion is a straight file swap again (as the W promotion was). A load-time
+    validator should also assert the count headers match the expected clean set and flag the
+    malformed `'[Name '` form rather than silently failing `validate_columns`.
 - SharePoint/email distribution pipeline
 - Azure Static Web Apps hosting
 - Monthly automated refresh — drop in new source file, run one command
