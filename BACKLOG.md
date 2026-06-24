@@ -54,6 +54,37 @@ rediscovering the path.
 - Start with a **STATIC decision-tree document** (format #1); assess whether an interactive
   guided version is worth building afterward.
 
+## EXPORT SUB-PROJECT — Office-Lever Export for the "Office Brief Project"
+
+**Status:** scoped, not yet built. **Trigger:** when the Office Brief Project is ready to
+consume it (period to be confirmed there).
+
+**Purpose:** Produce a parameterized per-office lever export that the new **Office Brief
+Project** consumes as an input. This model **OWNS the export** (the lever logic lives here);
+the Office Brief Project is the downstream **CONSUMER**.
+
+**What to build:**
+- A parameterized export function: `export_office_levers(start_period, end_period)` → clean
+  per-office CSV.
+- One row per office, across the **operating + wind-down + ramp** offices.
+- Columns: office name, lifecycle class (operating / wind-down / ramp), and the **six
+  levers** — $/visit, visits/dr-day, dr-days/day, net-prod-rev/day, total visits,
+  new patients — computed **for the given period** using this model's existing (verified)
+  lever logic.
+- **PARAMETERIZED period (not hardcoded)** — the Office Brief Project's period is still being
+  scoped; initial target is **trailing 12 complete months = June 2025 – May 2026** (fully
+  within File A; all complete months, no MTD/partial). Build it to accept any `[start, end]`
+  so future periods are a parameter change, not a rebuild.
+
+**Key notes:**
+- Lever values for **June 25 – May 26 will DIFFER** from this report's **Jan 25 – Jun 26**
+  values (different period — expected, not a discrepancy).
+- Only periods present in File A can be exported (currently **Jan 2025 onward**; reaching
+  before Jan 2025 would require more history).
+- **Format: CSV** (drag-and-drop friendly for the downstream model).
+- **Architecture:** this model **PUBLISHES** the export; the Office Brief Project
+  **SUBSCRIBES** — clean file-based handoff, no shared code, models stay independent.
+
 ## Phase 3 — Unified YoY + Forecast Dashboard
 
 **Concept:** Combine the YoY-NetProdRev-Analysis and forecast-model pipelines 
@@ -204,6 +235,8 @@ Recommend dedicated project sprint.
 - SharePoint/email distribution pipeline
 - Azure Static Web Apps hosting
 - Monthly automated refresh — drop in new source file, run one command
-- `data/A...xlsx` is a tracked data file — reconsider whether source data belongs in
-  version control; likely should be gitignored and kept out of the repo, with a
-  documented load process instead.
+- ~~`data/A...xlsx` is a tracked data file — reconsider whether source data belongs in
+  version control~~ **DONE** (commit 1f7aa15): File A untracked via `git rm --cached`
+  (kept on disk), now covered by the `data/*.xlsx` ignore rule so monthly refreshes stay
+  out of git. Resolved the stale-committed-data problem (HEAD's File A was a pre-June-2026
+  snapshot). `B.Provider_Map_Prod.xlsx` stays tracked (stable reference map).
