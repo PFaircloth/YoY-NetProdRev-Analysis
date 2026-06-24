@@ -24,6 +24,47 @@ def get_active_months():
     return _active_months
 _source_cache = None
 _pmap_cache = None
+_through_date = None
+_through_date_done = False
+
+
+def _ordinal(n):
+    """English ordinal for a day-of-month (1->'1st', 16->'16th', 22->'22nd')."""
+    suffix = "th" if 11 <= (n % 100) <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def get_through_date():
+    """Single source of truth for the report's as-of date. Read LIVE from File A's
+    'ThroughDate' column (exact header, no space) so it auto-updates on every re-pull —
+    never hardcoded. The value is constant across rows today; if it ever varies, take the
+    MAX. Returns a dict with:
+        raw     — the pandas Timestamp (or None)
+        display — "June 16, 2026" (or None)
+        ordinal — "16th"          (or None)
+        day     — 16              (or None)
+    All four are None when the column is absent (an older File A) so callers fall back to a
+    date-less period label rather than crash or render blank."""
+    global _through_date, _through_date_done
+    if _through_date_done:
+        return _through_date
+    df = pd.read_excel(config.SOURCE_FILE, sheet_name="NetProdRev_byOffice")
+    raw = None
+    if "ThroughDate" in df.columns:
+        col = pd.to_datetime(df["ThroughDate"], errors="coerce").dropna()
+        if not col.empty:
+            raw = col.max()
+    if raw is None:
+        _through_date = {"raw": None, "display": None, "ordinal": None, "day": None}
+    else:
+        _through_date = {
+            "raw": raw,
+            "display": f"{raw.strftime('%B')} {raw.day}, {raw.year}",
+            "ordinal": _ordinal(raw.day),
+            "day": raw.day,
+        }
+    _through_date_done = True
+    return _through_date
 
 
 def _safe(val):
