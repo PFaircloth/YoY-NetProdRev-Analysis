@@ -3,6 +3,29 @@ import config
 import pipeline
 from mix_dollars import (realization_diagnostic, tag_for, monthly_realization_trend,
                          monthly_realization_by_office)
+import diagnostic
+
+# ── Through-date (report-wide as-of fact) — set ONCE in generate_html() from the single
+# source of truth pipeline.get_through_date(); every flag site below reads it, none recompute.
+# All helpers fall back to the original date-less "MTD" wording when ThroughDate is absent.
+_THRU = {"raw": None, "display": None, "ordinal": None, "day": None}
+
+
+def _mtd_suffix():
+    """Compact partial-month chip for table/column headers: ' (thru 16)' live, ' (MTD)' fallback."""
+    d = _THRU.get("day")
+    return f" (thru {d})" if d else " (MTD)"
+
+
+def _mtd_band():
+    """SVG provisional-band label: 'Thru 16 · provisional' live, 'MTD · provisional' fallback."""
+    d = _THRU.get("day")
+    return f"Thru {d} &middot; provisional" if d else "MTD &middot; provisional"
+
+def _mtd_phrase():
+    """Prose flag: 'through the 16th, partial' live, 'month-to-date / partial' fallback."""
+    o = _THRU.get("ordinal")
+    return f"through the {o}, partial" if o else "month-to-date / partial"
 
 # ── View 1: Realization Diagnostic — (label, css, plain-language tooltip) per driver ──
 _RZ_TAG = {
@@ -232,7 +255,7 @@ def _rz_trend_svg(t):
     if mtd in xs:
         bx = (xs[closed[-1]] + xs[mtd]) / 2
         band = (f'<rect x="{bx:.1f}" y="{T}" width="{L+pw-bx:.1f}" height="{ph}" class="provband"/>'
-                f'<text x="{(bx+L+pw)/2:.1f}" y="{T+11}" class="provlab">MTD &middot; provisional</text>')
+                f'<text x="{(bx+L+pw)/2:.1f}" y="{T+11}" class="provlab">{_mtd_band()}</text>')
 
     def poly(series, color, dashed_tail):
         pts_closed = [(xs[m], Y(series[m])) for m in closed if series.get(m) is not None]
@@ -349,7 +372,7 @@ def _rz_net_explode(t, group):
     if mtd in xs:
         bx = (xs[closed[-1]] + xs[mtd]) / 2
         band = (f'<rect x="{bx:.1f}" y="{T}" width="{L+pw-bx:.1f}" height="{ph}" class="provband"/>'
-                f'<text x="{(bx+L+pw)/2:.1f}" y="{T+10}" class="provlab">{lab[mtd]} MTD</text>')
+                f'<text x="{(bx+L+pw)/2:.1f}" y="{T+10}" class="provlab">{lab[mtd]}{_mtd_suffix()}</text>')
 
     def poly(series, color):
         pts = [(xs[m], Y(series[m])) for m in closed if series[m] is not None]
@@ -408,7 +431,7 @@ def _rz_net_explode(t, group):
 
     return (f'<div class="rz-exp-h">{group} &mdash; Net / procedure by month '
             f'(<span style="color:{_RZ_C26}">{y2y}</span> vs <span style="color:{_RZ_C25}">{y1y}</span>; '
-            f'{lab[closed[0]]}&ndash;{lab[closed[-1]]} matched, {lab[mtd]} MTD/provisional)</div>'
+            f'{lab[closed[0]]}&ndash;{lab[closed[-1]]} matched, {lab[mtd]} {_mtd_phrase()} (provisional))</div>'
             f'<div class="rzx-wrap">{svg}</div>{table}')
 
 
@@ -446,7 +469,7 @@ def _rz_monthly_card(t):
     # HORIZONTAL table: months across the top, metric rows down the side.
     def _pcls(m):
         return ' class="prov"' if m == mtd else ''
-    head = ''.join(f'<th{_pcls(m)}>{lab[m]}{" (MTD)" if m == mtd else ""}</th>' for m in mths)
+    head = ''.join(f'<th{_pcls(m)}>{lab[m]}{_mtd_suffix() if m == mtd else ""}</th>' for m in mths)
 
     def cellrow(fn):
         return ''.join(f'<td{_pcls(m)}>{fn(m)}</td>' for m in mths)
@@ -474,7 +497,7 @@ def _rz_monthly_card(t):
     <div class="section-lbl">Is it steady, accelerating, or recent? &mdash; Monthly write-off-rate trend</div>
     <div class="hint">Same population and corrected basis as the view above &mdash; read as a <b>shape</b>.
       Company/office total only (procedure-level offered below; <b>provider</b>-monthly deliberately excluded
-      as too noisy on small per-month counts). Closed {lab[closed[0]]}&ndash;{lab[closed[-1]]} is the read; {lab[mtd]} is MTD/provisional.</div>
+      as too noisy on small per-month counts). Closed {lab[closed[0]]}&ndash;{lab[closed[-1]]} is the read; {lab[mtd]} is provisional ({_mtd_phrase()}).</div>
     <div class="rzm-callout">The monthly shape shows {read}.</div>
     <div class="rzm-wrap">{_rz_trend_svg(t)}
       <div class="rzm-key">
@@ -547,6 +570,467 @@ def _realization_tab(dollar_dataset):
             '     TAB 6 — REALIZATION (procedure $ / write-off diagnostic; office slicer)\n'
             '════════════════════════════════════════════════════ -->\n'
             f'<div id="tab6" style="display:none">{slicer}\n{"".join(panes)}</div>\n')
+
+
+# ── APEX — Diagnostic waterfall (new FIRST tab) + Portfolio tab ────────────────
+_AP_OPS, _AP_REV, _AP_CAP, _AP_DEV, _AP_NAVY = "#C0392B", "#7d3cc0", "#1a7a4a", "#b45309", "#1F3864"
+
+
+def _ap_M(x):
+    return ("&minus;" if x < 0 else "+") + f"${abs(x)/1e6:.2f}M"
+
+
+def _ap_k(x):
+    return ("&minus;" if x < 0 else "+") + f"${abs(x)/1e3:,.0f}K"
+
+
+def _ap_money(x):
+    return ("&minus;" if x < 0 else "+") + f"${abs(x):,.0f}"
+
+
+def _ap_jump(n, label):
+    return f'<button class="ap-jump" onclick="switchTab({n})">{label} &rarr;</button>'
+
+
+def _apex_waterfall_svg(b, total):
+    """Live SVG waterfall: the four bars cascade from $0 to the total decline, colour-coded
+    by owner, plus a reference Total bar. All geometry derives from the live $ values."""
+    cats = [("Throughput", b["throughput"], _AP_OPS, "Ops"),
+            ("$/Visit", b["spv"], _AP_REV, "Rev cycle + Ops"),
+            ("Capacity", b["capacity"], _AP_CAP, "offset"),
+            ("Portfolio", b["portfolio"], _AP_DEV, "Development")]
+    W, H, L, R, T, B = 900, 400, 78, 24, 38, 84
+    pw, ph = W - L - R, H - T - B
+    ymax = abs(total) * 1.12 or 1.0
+
+    def Y(v):
+        return T + (-v) / ymax * ph
+    n = len(cats) + 1
+    slot = pw / n
+    bw = slot * 0.54
+    s = [f'<svg viewBox="0 0 {W} {H}" class="apex-wf" role="img" aria-label="Net production decline waterfall">']
+    y0 = Y(0)
+    s.append(f'<line x1="{L}" y1="{y0:.1f}" x2="{L+pw}" y2="{y0:.1f}" class="wf-base"/>')
+    s.append(f'<text x="{L-8}" y="{y0+3:.1f}" class="wf-ylab">$0</text>')
+    cum = 0.0
+    px = pyv = None
+    for i, (name, val, color, owner) in enumerate(cats):
+        cx = L + (i + 0.5) * slot
+        before = cum; cum += val; after = cum
+        yb, ya = Y(before), Y(after)
+        ry, rh = min(yb, ya), abs(ya - yb)
+        x = cx - bw / 2
+        s.append(f'<rect x="{x:.1f}" y="{ry:.1f}" width="{bw:.1f}" height="{max(rh,2):.1f}" rx="2" fill="{color}"/>')
+        s.append(f'<text x="{cx:.1f}" y="{ry-6:.1f}" class="wf-val" fill="{color}">{_ap_M(val)}</text>')
+        s.append(f'<text x="{cx:.1f}" y="{H-B+22:.1f}" class="wf-cat">{name}</text>')
+        s.append(f'<text x="{cx:.1f}" y="{H-B+37:.1f}" class="wf-own">{owner}</text>')
+        if px is not None:
+            s.append(f'<line x1="{px:.1f}" y1="{pyv:.1f}" x2="{x:.1f}" y2="{yb:.1f}" class="wf-conn"/>')
+        px, pyv = x + bw, ya
+    cx = L + (n - 0.5) * slot
+    yt, x = Y(total), cx - bw / 2
+    s.append(f'<rect x="{x:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{yt-y0:.1f}" rx="2" fill="{_AP_NAVY}"/>')
+    s.append(f'<text x="{cx:.1f}" y="{yt+18:.1f}" class="wf-val" fill="{_AP_NAVY}">{_ap_M(total)}</text>')
+    s.append(f'<text x="{cx:.1f}" y="{H-B+22:.1f}" class="wf-cat wf-tot">Total</text>')
+    s.append(f'<line x1="{px:.1f}" y1="{pyv:.1f}" x2="{x:.1f}" y2="{pyv:.1f}" class="wf-conn"/>')
+    s.append('</svg>')
+    return "".join(s)
+
+
+def _apex_navtab(apex):
+    return ('' if apex is None else
+            '<button class="nav-tab" id="navTab0" onclick="switchTab(0)">&#129518; Diagnostic</button>\n  ')
+
+
+def _portfolio_navtab(apex):
+    return ('' if apex is None else
+            '\n  <button class="nav-tab" id="navTab7" onclick="switchTab(7)">&#127970; Portfolio</button>')
+
+
+def _apex_tab(apex):
+    if apex is None:
+        return ""
+    wf = apex["waterfall"]; b = wf["bars"]; total = wf["total"]
+    ss = apex["spv"]; th = apex["throughput"]; by = apex["by_bucket"]
+    wo = ss["writeoff_component"]
+    spv_other = b["spv"] + wo                       # residual after the write-off component
+    wind = by.get("wind-down", []); ramp = by.get("ramp", [])
+    wind_sum = sum(r["d_active"] for r in wind)
+    backfill = sum(r["d_active"] for r in (by.get("ramp", []) + by.get("run-off", []) + by.get("dormant", [])))
+    resid = by.get("run-off", []) + by.get("dormant", [])   # immaterial trailing run-off + dormant
+    resid_n = len(resid); resid_sum = sum(r["d_active"] for r in resid)
+
+    def _names(lst):
+        out = []
+        for r in lst:
+            foot = ""
+            if r["np26"] < -1000:                   # collapsed past zero into prior-period run-off
+                foot = (f'<span class="ap-foot">(&minus;${abs(r["np25"]):,.0f} closure '
+                        f'+ {_ap_money(r["np26"])} run-off)</span>')
+            out.append(f'<b>{r["office"]}</b> {_ap_k(r["d_active"])}{foot}')
+        return "; ".join(out)
+
+    np_pct = th["newpat_pct"] * 100
+    hv_pct = th["hyg_dv_pct"] * 100
+    dwo_pt = ss["d_wo"] * 100
+    hyg_dv = th["hyg_dv"]                            # all-in hygiene-visit Δ (count)
+    tv_pct = th["total_v_pct"] * 100                 # all-in total-visit decline
+    sh25, sh26 = th["hyg_share25"] * 100, th["hyg_share26"] * 100   # hygiene share of visits
+    hyg_direct = th["hyg_direct_dollar"]             # all-in direct $ (−$517K)
+    rz = apex.get("realz", {})
+    dwo_crown = (rz.get("Crown", {}).get("d_wo") or 0) * 100      # write-off-rate Δpt
+    dwo_implant = (rz.get("Implant", {}).get("d_wo") or 0) * 100
+
+    def _pp(g, key):                                 # per-proc delta, whole $, signed string
+        v = rz.get(g, {}).get(key)
+        return "&mdash;" if v is None else f"{'+' if v >= 0 else '&minus;'}${abs(round(v)):,.0f}"
+    _RZ_CAV = ('<span class="ap-cav">(per-procedure figures from rendered material '
+               'contributors &mdash; see Realization tab)</span>')
+
+    return f"""
+<!-- ═══════════════════════════════════════════════════
+     TAB 0 — DIAGNOSTIC APEX (where the YoY decline went)
+════════════════════════════════════════════════════ -->
+<div id="tab0">
+  <div class="ap-lead">Net production is down <b>${abs(total)/1e6:.1f}M</b> YoY <span class="ap-mtd">{('(through ' + _THRU['display'] + ' &mdash; ' + _THRU['raw'].strftime('%B') + ' is a partial month)') if _THRU['display'] else '(through June &mdash; June is month-to-date/partial)'}</span>. Here&rsquo;s exactly where it went &mdash; and the one lever that moves the most.</div>
+
+  <div style="font-size:11px;line-height:1.5;color:#7a8190;background:#f7f8fb;border:0.5px solid #e6e9f0;border-radius:6px;padding:8px 12px;margin:0 0 14px"><b style="color:#5a6172">Basis:</b> Diagnostic figures are <b>all-in</b> (full population, all 96 offices) to match the ${abs(total)/1e6:.1f}M total. Detail tabs show <b>material contributors</b> (~90% of production). Per-procedure figures, where noted, come from the material-contributor detail &mdash; the only level at which procedure-level data exists.</div>
+
+  <div class="card ap-hero">
+    <div class="section-lbl">Where the ${abs(total)/1e6:.1f}M went &mdash; production decline, by owner</div>
+    {_apex_waterfall_svg(b, total)}
+    <div class="ap-wf-key">
+      <span><i style="background:{_AP_OPS}"></i>Throughput &middot; Ops</span>
+      <span><i style="background:{_AP_REV}"></i>$/Visit &middot; Revenue cycle</span>
+      <span><i style="background:{_AP_CAP}"></i>Capacity &middot; offset</span>
+      <span><i style="background:{_AP_DEV}"></i>Portfolio &middot; Development</span>
+      <span class="ap-wf-note">Exact decomposition (Shapley) &mdash; the four bars sum to the total, no residual.</span>
+    </div>
+  </div>
+
+  <div class="ap-buckets">
+    <div class="ap-bucket" style="border-left-color:{_AP_OPS}">
+      <div class="ap-b-top"><span class="ap-b-amt">{_ap_M(b['throughput'])}</span><span class="ap-b-title">Throughput &mdash; fewer visits</span><span class="ap-b-owner" style="background:{_AP_OPS}">Owner: Ops</span></div>
+      <div class="ap-b-body">Fewer visits coming through the door &mdash; new patients <b>{np_pct:+.0f}%</b>, hygiene visits <b>{hv_pct:+.1f}%</b>. <b>Not</b> treatment intensity (procedures-per-visit is flat). This is a demand / recall problem.</div>
+      <div class="ap-b-jumps">{_ap_jump(5,'Mix Shift (procedure shape)')}{_ap_jump(1,'New-patient detail &middot; Office Analysis')}</div>
+    </div>
+
+    <div class="ap-bucket" style="border-left-color:{_AP_REV}">
+      <div class="ap-b-top"><span class="ap-b-amt">{_ap_M(b['spv'])}</span><span class="ap-b-title">$/Visit &mdash; net revenue per visit</span><span class="ap-b-owner" style="background:{_AP_REV}">Owner: Rev cycle + Ops</span></div>
+      <div class="ap-b-body">Each visit is worth less. <b>Approximately {_ap_k(-abs(wo))}</b> of this is the <b>write-off rate rising {dwo_pt:+.1f}pt</b> since January (collections, structural). The remaining <b>~{_ap_k(spv_other)}</b> is other per-visit movement &mdash; softening in procedures such as <b>Ortho ({_pp('Ortho','d_net_per')}/proc)</b> and <b>Endo ({_pp('Endo','d_net_per')}/proc)</b>. {_RZ_CAV} <span class="ap-cav">(write-off piece is the closed-window Realization figure; $/Visit is the active-window office figure &mdash; an honest approximate component across two windows.)</span></div>
+      <div class="ap-b-jumps">{_ap_jump(6,'Write-offs &middot; Realization')}{_ap_jump(5,'Mix / intensity &middot; Mix Shift')}</div>
+    </div>
+
+    <div class="ap-bucket" style="border-left-color:{_AP_REV};background:#fbfcfe">
+      <div class="ap-b-body" style="margin:0"><b>Even high-value procedures are being written down more.</b> <b>Crowns</b> &mdash; gross/proc <i>rose</i> {_pp('Crown','d_gross_per')} yet net/proc <i>fell</i> {_pp('Crown','d_net_per')}: the swing is the <b>{dwo_crown:+.1f}pt</b> write-off. <b>Implants</b> &mdash; write-offs rose <b>{dwo_implant:+.1f}pt</b> even here; net/proc held ({_pp('Implant','d_net_per')}) <b>only because fees rose</b> ({_pp('Implant','d_gross_per')}/proc) to cover it &mdash; the erosion is real, masked by higher gross. {_RZ_CAV}</div>
+    </div>
+
+    <div class="ap-bucket" style="border-left-color:{_AP_DEV}">
+      <div class="ap-b-top"><span class="ap-b-amt">{_ap_M(b['portfolio'])}</span><span class="ap-b-title">Portfolio &mdash; the pipeline gap</span><span class="ap-b-owner" style="background:{_AP_DEV}">Owner: Development</span></div>
+      <div class="ap-b-body">{_names(wind)} wound down; {_names(ramp) or 'nothing'} backfilling. <b>{_ap_k(wind_sum)}</b> of capacity closed, <b>{_ap_k(backfill)}</b> replaced &mdash; the development pipeline isn&rsquo;t keeping pace. Plus <b>~{resid_n}</b> already-closed / dormant offices contributing <b>{_ap_k(resid_sum)}</b> of residual run-off &mdash; the offset that brings the bar to <b>{_ap_k(b['portfolio'])}</b>.</div>
+      <div class="ap-b-jumps">{_ap_jump(7,'Lifecycle segmentation &middot; Portfolio')}</div>
+    </div>
+
+    <div class="ap-cap-note"><span class="ap-b-amt" style="color:{_AP_CAP}">{_ap_M(b['capacity'])}</span> <b>Capacity</b> &mdash; doctor-days deployed are slightly <b>up</b>, a small positive offset. Not a problem bucket.</div>
+  </div>
+
+  <div class="ap-linchpin">
+    <div class="ap-lp-h">&#128161; The linchpin: hygiene is the highest-<i>leverage</i> fix</div>
+    Hygiene visits fell <b>~{abs(hyg_dv):,.0f} ({hv_pct:+.1f}%)</b> &mdash; yet they held up <b>better than total visits ({tv_pct:+.1f}%)</b>, so hygiene&rsquo;s <b>share of visits rose {sh25:.1f}% &rarr; {sh26:.1f}%</b>. That decline drives <b>Throughput</b> directly &mdash; and hygiene visits feed restorative production <b>downstream</b>, so recovering hygiene volume addresses throughput now and production later.
+    <div class="ap-lp-note" style="margin-top:7px"><b>Why volume, not rate?</b> Hygiene&rsquo;s per-visit revenue is held down by <b>payor mix &mdash; structural, not ours to change</b>. So the lever is <b>VISITS</b> (which we can move), not <b>RATE</b> (which we can&rsquo;t).</div>
+    <div class="ap-lp-note">Hygiene&rsquo;s <i>direct</i> dollar loss is <b>~{_ap_k(hyg_direct)}</b> &mdash; meaningful, but a fraction of the {_ap_M(b['throughput'])} throughput bar. Its real value is as the <b>funnel / lever</b>, not its own line.</div>
+  </div>
+
+  <div class="ap-not"><b>What it&rsquo;s NOT:</b> not pricing (gross-per-procedure held or rose), not procedure mix or treatment intensity (flat &mdash; see Mix Shift), not capacity (doctor-days up, {_ap_M(b['capacity'])}). The decline is <b>visit volume + collections</b>, not rate or mix.</div>
+
+  <div class="ap-toc">
+    <div class="ap-toc-h">Go to the detail</div>
+    {_ap_jump(1,'&#127970; Office Analysis &mdash; Rev/Day levers per office')}
+    {_ap_jump(5,'&#128138; Mix Shift &mdash; procedure shape & hygiene')}
+    {_ap_jump(6,'&#128181; Realization &mdash; write-offs / $ per procedure')}
+    {_ap_jump(7,'&#127970; Portfolio &mdash; office lifecycle')}
+  </div>
+</div>
+"""
+
+
+def _portfolio_tab(apex):
+    if apex is None:
+        return ""
+    by = apex["by_bucket"]; cls = apex["classes"]
+    op = by.get("operating", []); wind = by.get("wind-down", [])
+    ramp = by.get("ramp", []); runoff = by.get("run-off", []); dorm = by.get("dormant", [])
+    op_sum = sum(r["d_active"] for r in op)
+    wind_sum = sum(r["d_active"] for r in wind)
+    backfill = sum(r["d_active"] for r in (ramp + runoff + dorm))
+    portfolio_net = wind_sum + backfill
+    total = op_sum + portfolio_net
+
+    def seg(label, items, color):
+        tot = sum(r["d_active"] for r in items)
+        return (f'<div class="pf-seg" style="border-top-color:{color}">'
+                f'<div class="pf-seg-n">{len(items)}</div>'
+                f'<div class="pf-seg-l">{label}</div>'
+                f'<div class="pf-seg-d">{_ap_k(tot)}</div></div>')
+
+    def rows(items):
+        out = []
+        for r in items:
+            foot = ""
+            if r["np26"] < -1000:
+                foot = (f'<div class="pf-foot">&minus;${abs(r["np25"]):,.0f} closure '
+                        f'+ {_ap_money(r["np26"])} prior-period run-off</div>')
+            out.append(
+                f'<tr><td class="l">{r["office"]}{foot}</td>'
+                f'<td>${r["np25"]:,.0f}</td><td>${r["np26"]:,.0f}</td>'
+                f'<td class="{"nc" if r["d_active"]<0 else "pc"}"><b>{_ap_money(r["d_active"])}</b></td></tr>')
+        return "".join(out)
+
+    def _ex_names(items, n):                          # representative names by |Δ|, rollup excluded
+        cand = sorted((r for r in items if "Marquee Dental Partners" not in r["office"]),
+                      key=lambda r: -abs(r["d_active"]))
+        return [r["office"] for r in cand[:n]]
+    ro_ex, do_ex = _ex_names(runoff, 2), _ex_names(dorm, 1)
+    ex_bits = [n + " (run-off)" for n in ro_ex] + [n + " (dormant)" for n in do_ex]
+    resid_n = len(runoff) + len(dorm)
+    resid_sum = sum(r["d_active"] for r in (runoff + dorm))
+
+    y2 = apex["year_2"]
+    return f"""
+<!-- ═══════════════════════════════════════════════════
+     TAB 7 — PORTFOLIO (office lifecycle segmentation)
+════════════════════════════════════════════════════ -->
+<div id="tab7" style="display:none">
+  <div class="card">
+    <div class="section-lbl">Portfolio lifecycle &mdash; the {_ap_k(apex['waterfall']['bars']['portfolio']).replace('&minus;','&minus;').lstrip('+')} bar, explained</div>
+    <div class="pf-lead"><b>{_ap_k(wind_sum).lstrip('+')}</b> of production capacity wound down, only <b>{_ap_k(backfill)}</b> backfilled &mdash; a net <b class="nc">{_ap_k(portfolio_net)}</b> pipeline gap. Every office below is classified <b>live</b> from the source each build (no hardcoded list); liveness is decided on the matched Jan&ndash;May window.</div>
+    <div style="font-size:11px;font-weight:700;letter-spacing:.3px;color:#7a8190;text-transform:uppercase;margin:2px 0 7px">Office lifecycle &mdash; {len(cls)} offices classified</div>
+    <div class="pf-segs">
+      {seg('Operating', op, _AP_NAVY)}
+      {seg('Winding down', wind, _AP_OPS)}
+      {seg('Ramping', ramp, _AP_CAP)}
+      {seg('Run-off', runoff, '#999')}
+      {seg('Dormant', dorm, '#ccc')}
+    </div>
+    <div class="hint">Operating clinics (the {len(op)} live in both years) carry {_ap_k(op_sum)} &mdash; the rest of the $7.6M story, broken out on the Diagnostic tab. This tab isolates the <b>lifecycle</b> piece below.</div>
+
+    <div class="pf-block"><div class="pf-block-h" style="color:{_AP_OPS}">Winding down &mdash; meaningful {apex['year_1']} production collapsed toward zero in {y2}</div>
+      <table class="pf-tbl"><thead><tr><th class="l">Office</th><th>{apex['year_1']}</th><th>{y2}</th><th>&Delta; YoY</th></tr></thead><tbody>{rows(wind)}</tbody></table></div>
+
+    <div class="pf-block"><div class="pf-block-h" style="color:{_AP_CAP}">Ramping &mdash; ~zero {apex['year_1']}, meaningful {y2} (the backfill)</div>
+      <table class="pf-tbl"><thead><tr><th class="l">Office</th><th>{apex['year_1']}</th><th>{y2}</th><th>&Delta; YoY</th></tr></thead><tbody>{rows(ramp)}</tbody></table></div>
+
+    <div class="pf-foot-note">Run-off ({len(runoff)} offices, {_ap_k(sum(r['d_active'] for r in runoff))}) = negative prior-period adjustments at closed sites unwinding; Dormant ({len(dorm)}) = ~zero both years. Together these <b>{resid_n}</b> immaterial trailing offices net <b>{_ap_k(resid_sum)}</b> &mdash; e.g. {", ".join(ex_bits)}. Portfolio bar = winding-down + ramping + run-off + dormant = <b>{_ap_k(portfolio_net)}</b>, tying to the Diagnostic waterfall by construction.</div>
+  </div>
+</div>
+"""
+
+
+# ── TAB 8 — AUDIT & SOURCES (provenance of every Diagnostic figure) ───────────
+def _audit_navtab(apex):
+    return ('' if apex is None else
+            '\n  <button class="nav-tab" id="navTab8" onclick="switchTab(8)">&#128269; Audit &amp; Sources</button>')
+
+
+def _audit_tab(apex):
+    """The auditability layer: every Diagnostic apex figure traced to source / population /
+    window / derivation, for an accountant/CFO reader. Values DERIVE LIVE from the same
+    apex_payload that feeds tab 0 — only the methodology text is stable. Absent (graceful)
+    when apex is None, so tabs 0–7 and the build are unaffected."""
+    if apex is None:
+        return ""
+    wf = apex["waterfall"]; b = wf["bars"]; total = wf["total"]
+    ss = apex["spv"]; th = apex["throughput"]; by = apex["by_bucket"]; cls = apex["classes"]
+    y1, y2 = apex["year_1"], apex["year_2"]
+    wo = ss["writeoff_component"]                       # positive magnitude of write-off $ lost
+    spv_other = b["spv"] + wo                           # residual per-visit (cross-window approx)
+
+    # ── windows, live from the payload (no hardcoded month names) ──
+    active = wf["window"]["active"]; mtd = wf["window"]["mtd"]
+    closed = [m for m in active if m != mtd]
+
+    def _wlab(ms):
+        return f"{pipeline.MONTH_LABELS[ms[0]]}&ndash;{pipeline.MONTH_LABELS[ms[-1]]}"
+    AW, CW = _wlab(active), _wlab(closed)               # Jan–Jun (active), Jan–May (matched/closed)
+
+    # ── populations, live counts ──
+    n_all = len(cls); n_op = wf["n_operating"]; n_nonop = n_all - n_op
+    nb = {k: len(by.get(k, [])) for k in ("operating", "wind-down", "ramp", "run-off", "dormant")}
+    wind = by.get("wind-down", []); ramp = by.get("ramp", [])
+    runoff = by.get("run-off", []); dorm = by.get("dormant", [])
+    resid = runoff + dorm
+    resid_sum = sum(r["d_active"] for r in resid)
+
+    # ── derived display values ──
+    np_pct = th["newpat_pct"] * 100; hv_pct = th["hyg_dv_pct"] * 100
+    tv_pct = th["total_v_pct"] * 100; dwo_pt = ss["d_wo"] * 100
+    AA = f"All-in &middot; {n_all}"; OP = f"Operating &middot; {n_op}"; NO = f"Non-op &middot; {n_nonop}"
+    FA, MX = "File&nbsp;A", "Mix extract"
+    # Canonical source references — defined ONCE so §1 and §3 name the same source with
+    # byte-identical wording (no drift). DBO.Fact_Visit rendered in a monospace <code> span.
+    FA_SRC = "Tredence Company Summary Report"
+    FV = ('<code style="font-family:ui-monospace,Menlo,Consolas,monospace;'
+          'font-size:.92em">DBO.Fact_Visit</code>')
+    MX_SRC = f"Tredence {FV}"
+
+    def vc(x):
+        return "neg" if x < 0 else "pos"
+
+    def row(fig, val, src, pop, win, deriv, cls_v=""):
+        return (f'<tr><td class="l">{fig}</td><td class="v {cls_v}">{val}</td>'
+                f'<td>{src}</td><td>{pop}</td><td>{win}</td><td class="d">{deriv}</td></tr>')
+
+    # ── SECTION 1 — populations / windows / sources ──
+    pop_defs = [
+        ("Operating", nb["operating"], f"live production in BOTH years (&ge;$50K/yr on the matched {CW} window)", "Shapley bars (Throughput / $/Visit / Capacity)"),
+        ("Wind-down", nb["wind-down"], f"meaningful {y1}, collapsed toward zero {y2}", "Portfolio bar"),
+        ("Ramp", nb["ramp"], f"~zero {y1}, meaningful {y2} (the backfill)", "Portfolio bar"),
+        ("Run-off", nb["run-off"], "negative prior-period adjustments unwinding at closed sites", "Portfolio bar"),
+        ("Dormant", nb["dormant"], "~zero production in both years", "Portfolio bar"),
+    ]
+    pop_rows = "".join(
+        f'<tr><td class="l">{lbl}</td><td class="v">{n}</td><td class="d">{desc}</td><td class="d">{use}</td></tr>'
+        for lbl, n, desc, use in pop_defs)
+    pop_rows += (f'<tr class="tot"><td class="l">All-in (exhaustive)</td><td class="v">{n_all}</td>'
+                 f'<td class="d" colspan="2">operating + wind-down + ramp + run-off + dormant &mdash; '
+                 f'the full population behind the {_ap_M(total)} total</td></tr>')
+
+    win_rows = (
+        f'<tr><td class="l">Matched &mdash; {CW}</td><td class="d">Both years complete (no partial month)</td>'
+        f'<td class="d">Office liveness classification &middot; all-in write-off rate &middot; per-procedure realization</td></tr>'
+        f'<tr><td class="l">Active &mdash; {AW}</td><td class="d">{pipeline.MONTH_LABELS[mtd]} is partial &mdash; '
+        f'{("data through " + _THRU["display"]) if _THRU["display"] else "month-to-date"}</td>'
+        f'<td class="d">Headline {_ap_M(total)} &middot; Shapley bars &middot; visit &amp; new-patient counts</td></tr>')
+
+    src_rows = (
+        f'<tr><td class="l">File&nbsp;A</td>'
+        f'<td class="d">Sourced from the {FA_SRC} &mdash; the same source used for revenue GL booking, '
+        f'so the analysis reconciles to the booked figures. Ledger / booking source: gross, '
+        f'production-adjustment &amp; net production, all providers, every office</td>'
+        f'<td class="d">Every all-in figure (the {_ap_M(total)} total &amp; its bars, visits, new patients, write-off rate)</td></tr>'
+        f'<tr><td class="l">Mix extract</td>'
+        f'<td class="d">Sourced primarily from the {MX_SRC} table. Procedure-level corrected dollar detail &mdash; material providers only</td>'
+        f'<td class="d">Per-procedure realization examples (Ortho / Endo / Crown / Implant)</td></tr>')
+
+    # ── SECTION 2 — figure-by-figure audit (every headline apex figure) ──
+    rz = apex.get("realz", {})
+
+    def _pp(g, key):
+        v = rz.get(g, {}).get(key)
+        return "&mdash;" if v is None else f"{'+' if v >= 0 else '&minus;'}${abs(round(v)):,.0f}"
+
+    def _ppc(g, key):
+        v = rz.get(g, {}).get(key)
+        return "" if v is None else ("pos" if v >= 0 else "neg")
+
+    def pp_row(g):
+        dwo = rz.get(g, {}).get("d_wo")
+        dwo_s = "&mdash;" if dwo is None else f"{dwo * 100:+.1f}pt"
+        return row(f"Realization &mdash; {g} net/proc", _pp(g, "d_net_per"), MX, "Rendered/material", CW,
+                   f"Net corrected $/proc {y1}&rarr;{y2}; gross/proc {_pp(g,'d_gross_per')}, write-off {dwo_s}",
+                   _ppc(g, "d_net_per"))
+
+    def pf_row(r, lbl):
+        return row(f"Portfolio &mdash; {r['office']}", _ap_k(r["d_active"]), FA, f"Non-op &middot; {lbl}", AW,
+                   f"{y1} ${r['np25']:,.0f} &rarr; {y2} ${r['np26']:,.0f}", vc(r["d_active"]))
+
+    fig_rows = "".join([
+        row("Total net-production decline", _ap_M(total), FA, AA, AW,
+            f"Net production {y1} &minus; {y2}; &Sigma; every office&rsquo;s YoY &Delta; (zero residual)", vc(total)),
+        row("Throughput bar", _ap_M(b["throughput"]), FA, OP, AW,
+            "Shapley on the identity $/Visit &times; Visits/DrDay &times; DoctorDays", vc(b["throughput"])),
+        row("$/Visit bar", _ap_M(b["spv"]), FA, OP, AW,
+            "Shapley (same identity) &mdash; net realization per visit", vc(b["spv"])),
+        row("&#8627; write-off component", _ap_M(-wo), FA, AA, CW,
+            f"&Delta;write-off-rate ({dwo_pt:+.1f}pt) &times; gross {y2}", "neg"),
+        row("&#8627; other per-visit", _ap_M(spv_other), FA, OP, f"{AW} / {CW}",
+            "$/Visit bar &minus; write-off component (approx. residual, cross-window)", vc(spv_other)),
+        row("Capacity bar", _ap_M(b["capacity"]), FA, OP, AW,
+            "Shapley &mdash; doctor-days deployed (calendar &times; staffing)", vc(b["capacity"])),
+        row("Portfolio bar", _ap_M(b["portfolio"]), FA, NO, AW,
+            f"wind-down + ramp + run-off + dormant YoY &Delta; ({n_nonop} offices)", vc(b["portfolio"])),
+        row("New-patient count", f"{th['newpat25']:,.0f}&rarr;{th['newpat26']:,.0f} <span class='pct'>({np_pct:+.1f}%)</span>",
+            FA, AA, AW, "&Sigma; NEW PATIENT COUNT, both years", "neg"),
+        row("Hygiene visits", f"{th['hyg_v25']:,.0f}&rarr;{th['hyg_v26']:,.0f} <span class='pct'>({hv_pct:+.1f}%)</span>",
+            FA, AA, AW, "Hygienist-provider VISITS via the role map (99.9% mapped)", "neg"),
+        row("Hygiene direct $", _ap_k(th["hyg_direct_dollar"]), FA, AA, AW,
+            f"&Delta;(hygiene visits) &times; baseline net/hygiene-visit (${th['hyg_per_visit']:,.0f})", "neg"),
+        row("Total visits", f"{th['total_v25']:,.0f}&rarr;{th['total_v26']:,.0f} <span class='pct'>({tv_pct:+.1f}%)</span>",
+            FA, AA, AW, "&Sigma; VISITS, both years", "neg"),
+        row("Write-off rate", f"{ss['wo25']*100:.1f}%&rarr;{ss['wo26']*100:.1f}% <span class='pct'>({dwo_pt:+.1f}pt)</span>",
+            FA, AA, CW, "&minus;PRODUCTION ADJUSTMENT &divide; GROSS PRODUCTION (all providers)", "neg"),
+        pp_row("Ortho"), pp_row("Endo"), pp_row("Crown"), pp_row("Implant"),
+    ])
+    fig_rows += "".join(pf_row(r, "wind-down") for r in wind)
+    fig_rows += "".join(pf_row(r, "ramp") for r in ramp)
+    fig_rows += row("Portfolio &mdash; run-off + dormant", _ap_k(resid_sum), FA, f"Non-op &middot; {len(resid)}", AW,
+                    "Prior-period adjustments unwinding + ~zero-both-years offices (immaterial trailing)", vc(resid_sum))
+
+    # ── SECTION 3 — known basis differences (apex all-in vs detail tabs) ──
+    basis_rows = "".join([
+        f'<tr><td class="l">Hygiene visits {hv_pct:+.1f}%</td><td>All-in &middot; {n_all} (File&nbsp;A &mdash; {FA_SRC})</td>'
+        f'<td>Mix Shift hygiene / Other &mdash; rendered &mdash; mix extract ({MX_SRC})</td>'
+        f'<td class="d">Different population &amp; basis BY DESIGN. The apex is all-in to tie the {_ap_M(total)} total; '
+        f'detail tabs show material contributors (~90% of production). Both correct on their stated basis.</td></tr>',
+        f'<tr><td class="l">Per-procedure $ (Ortho / Endo / Crown / Implant)</td>'
+        f'<td>Rendered / material (mix extract &mdash; {MX_SRC})</td><td>Realization &amp; Mix Shift (same basis)</td>'
+        f'<td class="d">Procedure-level adjustment data exists ONLY in the mix extract (material providers) &mdash; '
+        f'so per-procedure figures are rendered-only by necessity, never all-in.</td></tr>',
+        f'<tr><td class="l">Write-off rate {dwo_pt:+.1f}pt</td><td>All-in &middot; {n_all} (File&nbsp;A &mdash; {FA_SRC})</td>'
+        f'<td>Realization tab rate &mdash; rendered &mdash; mix extract ({MX_SRC})</td>'
+        f'<td class="d">The two match to ~0.1pt but use different population &amp; source. The apex uses File&nbsp;A ({FA_SRC}) '
+        f'all-in so the component stays consistent with the {_ap_M(total)} total.</td></tr>',
+        f'<tr><td class="l">Shapley bars (Throughput / $/Visit / Capacity)</td><td>Operating &middot; {n_op} (File&nbsp;A &mdash; {FA_SRC})</td>'
+        f'<td>Portfolio tab &mdash; the {n_nonop} non-operating offices</td>'
+        f'<td class="d">The bars decompose the operating-{n_op} subtotal only; the Portfolio bar carries the {n_nonop} '
+        f'non-operating offices. Operating + Portfolio = the all-in {_ap_M(total)}.</td></tr>',
+    ])
+
+    return f"""
+<!-- ═══════════════════════════════════════════════════
+     TAB 8 — AUDIT & SOURCES (provenance of every figure)
+════════════════════════════════════════════════════ -->
+<div id="tab8" style="display:none">
+  <div class="card">
+    <div class="section-lbl">Audit &amp; sources &mdash; trace every Diagnostic figure to its source, population &amp; window</div>
+    <div class="au-intro">Every figure on the <b>Diagnostic</b> tab derives <b>live</b> from the same computation documented here &mdash; no hardcoded numbers. This tab is the provenance layer: which <b>source file</b>, which <b>population</b>, which <b>window</b>, and exactly <b>how each value is derived</b>. The one rule that resolves most cross-checks: the apex is <b>all-in</b> (all {n_all} offices) to tie the {_ap_M(total)} total; detail tabs show <b>material contributors</b>.</div>
+
+    <div class="au-sec">1 &middot; Populations &amp; bases &mdash; the conceptual key</div>
+    <table class="au-tbl">
+      <thead><tr><th>Segment</th><th style="text-align:right">Offices</th><th>Definition (classified live each build)</th><th>Used on</th></tr></thead>
+      <tbody>{pop_rows}</tbody>
+    </table>
+    <div class="au-note">Rendered / material contributors (the detail-tab basis) = cumulative 90% of production + a 2% floor &mdash; a subset of the full {n_all}-office population. Per-procedure dollar detail exists only at this grain.</div>
+    <table class="au-tbl">
+      <thead><tr><th>Window</th><th>What it is</th><th>Figures that use it</th></tr></thead>
+      <tbody>{win_rows}</tbody>
+    </table>
+    <table class="au-tbl">
+      <thead><tr><th>Source file</th><th>What it is</th><th>Figures it feeds</th></tr></thead>
+      <tbody>{src_rows}</tbody>
+    </table>
+    <div class="au-note">{('Data current as of <b>' + _THRU['display'] + '</b>, read live from File&nbsp;A&rsquo;s <code style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em">ThroughDate</code> field.') if _THRU['display'] else 'Data current through the active window (File&nbsp;A carries no ThroughDate field in this extract).'}</div>
+  </div>
+
+  <div class="card">
+    <div class="au-sec">2 &middot; Figure-by-figure audit &mdash; every apex number, traced</div>
+    <table class="au-tbl">
+      <thead><tr><th>Figure</th><th style="text-align:right">Value</th><th>Source</th><th>Population</th><th>Window</th><th>How derived</th></tr></thead>
+      <tbody>{fig_rows}</tbody>
+    </table>
+    <div class="au-note">Values pull from the live apex payload at build time; only the Source / Population / Window / derivation text is fixed. Sub-rows (&#8627;) are components of the $/Visit bar above them. The <b>Source</b> column uses short names &mdash; source files are defined in &sect;1 above.</div>
+  </div>
+
+  <div class="card">
+    <div class="au-sec">3 &middot; Known basis differences &mdash; where apex intentionally differs from a detail tab</div>
+    <table class="au-tbl">
+      <thead><tr><th>Figure</th><th>Apex basis</th><th>Detail-tab counterpart</th><th>Why they differ (by design)</th></tr></thead>
+      <tbody>{basis_rows}</tbody>
+    </table>
+    <div class="au-note">These are not discrepancies &mdash; each figure is correct on its stated population. The apex stays all-in so its bars sum to the {_ap_M(total)} total; the detail tabs zoom into the material contributors where procedure-level data lives.</div>
+  </div>
+</div>
+"""
 
 
 # ── View 2: per-provider procedure-dollar detail (Mix Shift expand) ───────────
@@ -749,12 +1233,22 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
     months = pipeline.get_active_months()
     mtd = config.MTD_MONTH
     mtd_active = mtd in months and months[-1] == mtd   # partial month is the latest
-    labels = [pipeline.MONTH_LABELS[m] + (" (MTD)" if (mtd_active and m == mtd) else "")
+
+    # Through-date: report-wide as-of, read LIVE from File A's ThroughDate column (the one
+    # computation; every flag site reads _THRU). Falls back to date-less wording if absent.
+    global _THRU
+    _THRU = pipeline.get_through_date()
+    asof = f" &mdash; data through {_THRU['display']}" if _THRU["display"] else ""
+    mtd_chip = (f"thru {_THRU['day']}" if _THRU["day"] else "MTD")   # compact JS column chip
+    mtd_display = _THRU["display"] or ""
+
+    labels = [pipeline.MONTH_LABELS[m] + (_mtd_suffix() if (mtd_active and m == mtd) else "")
               for m in months]
     rng = (pipeline.MONTH_LABELS[months[0]] + "&ndash;" + pipeline.MONTH_LABELS[months[-1]]
            + " " + str(config.YEAR_1) + " vs " + str(config.YEAR_2))
     mtd_label = pipeline.MONTH_LABELS[mtd] if mtd_active else ""
-    mtd_hint = (" <strong>" + labels[-1] + "</strong> = month-to-date (partial month); "
+    _hint_asof = ("data through " + _THRU["display"]) if _THRU["display"] else "month-to-date"
+    mtd_hint = (" <strong>" + labels[-1] + "</strong> = " + _hint_asof + " (partial month); "
                 "KPIs and YTD include it &mdash; not a full-month figure." if mtd_active else "")
 
     wd_y1 = round(sum(config.WORKING_DAYS.get((m, config.YEAR_1), 0) for m in months), 1)
@@ -773,14 +1267,24 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
     html = html.replace("__WD26__",       str(wd_y2))
     html = html.replace("__MO_LABELS__",  json.dumps(labels, ensure_ascii=False))
     html = html.replace("__RANGE__",      rng)
+    html = html.replace("__ASOF__",       asof)
     html = html.replace("__LASTMO__",     labels[-1])
     html = html.replace("__MTD_LABEL__",  json.dumps(mtd_label, ensure_ascii=False))
+    html = html.replace("__MTD_DISPLAY__", json.dumps(mtd_display, ensure_ascii=False))
+    html = html.replace("__MTD_CHIP__",   json.dumps(mtd_chip, ensure_ascii=False))
     html = html.replace("__MTD_ACTIVE__", "true" if mtd_active else "false")
     html = html.replace("__MTD_HINT__",   mtd_hint)
     html = html.replace("__MO_FIRST__",   pipeline.MONTH_LABELS[months[0]])
     html = html.replace("__MO_LAST__",    pipeline.MONTH_LABELS[months[-1]])
     html = html.replace("__REALIZATION_NAVTAB__", _realization_navtab(dollar_dataset))
     html = html.replace("__REALIZATION_TAB__", _realization_tab(dollar_dataset))
+    apex = diagnostic.apex_payload(dollar_dataset) if dollar_dataset is not None else None
+    html = html.replace("__APEX_NAVTAB__", _apex_navtab(apex))
+    html = html.replace("__PORTFOLIO_NAVTAB__", _portfolio_navtab(apex))
+    html = html.replace("__APEX_TAB__", _apex_tab(apex))
+    html = html.replace("__PORTFOLIO_TAB__", _portfolio_tab(apex))
+    html = html.replace("__AUDIT_NAVTAB__", _audit_navtab(apex))
+    html = html.replace("__AUDIT_TAB__", _audit_tab(apex))
     html = html.replace("__MIX_DOLLARS_DATA__",
                         json.dumps(_mix_dollars_payload(dollar_dataset),
                                    ensure_ascii=False, separators=(",", ":")))
@@ -995,6 +1499,82 @@ td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
 .realz-monthly-card .sk{border:0.5px solid #eee;border-radius:6px;padding:6px 8px}
 .realz-monthly-card .sk-l{font-size:10.5px;font-weight:600;color:#444;margin-bottom:2px}
 .realz-monthly-card svg.spark{width:100%;height:30px;display:block;overflow:visible}
+/* Tab 0 — Diagnostic apex */
+#tab0 .ap-lead{font-size:17px;line-height:1.5;color:#1F3864;font-weight:600;background:#fff;border:0.5px solid #ddd;border-left:4px solid #C0392B;border-radius:8px;padding:16px 20px;margin-bottom:14px}
+#tab0 .ap-lead b{color:#C0392B}
+#tab0 .ap-mtd{font-size:12px;font-weight:400;color:#999}
+#tab0 .ap-hero{padding:18px 20px}
+#tab0 svg.apex-wf{width:100%;height:auto;display:block}
+#tab0 svg.apex-wf .wf-base{stroke:#bbb;stroke-width:1;stroke-dasharray:3 2}
+#tab0 svg.apex-wf .wf-conn{stroke:#bbb;stroke-width:1;stroke-dasharray:3 3}
+#tab0 svg.apex-wf .wf-ylab{fill:#aaa;font-size:11px;text-anchor:end}
+#tab0 svg.apex-wf .wf-val{font-size:14px;font-weight:700;text-anchor:middle}
+#tab0 svg.apex-wf .wf-cat{fill:#333;font-size:13px;font-weight:600;text-anchor:middle}
+#tab0 svg.apex-wf .wf-cat.wf-tot{fill:#1F3864;font-weight:700}
+#tab0 svg.apex-wf .wf-own{fill:#999;font-size:10px;text-anchor:middle}
+#tab0 .ap-wf-key{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:#666;margin-top:8px;align-items:center}
+#tab0 .ap-wf-key i{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;margin-right:5px}
+#tab0 .ap-wf-note{color:#999;font-style:italic}
+#tab0 .ap-buckets{display:flex;flex-direction:column;gap:12px;margin-bottom:14px}
+#tab0 .ap-bucket{background:#fff;border:0.5px solid #ddd;border-left:5px solid #ccc;border-radius:8px;padding:14px 18px}
+#tab0 .ap-b-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+#tab0 .ap-b-amt{font-size:22px;font-weight:700;color:#222;font-variant-numeric:tabular-nums}
+#tab0 .ap-b-title{font-size:15px;font-weight:600;color:#1F3864}
+#tab0 .ap-b-owner{margin-left:auto;font-size:11px;font-weight:600;color:#fff;padding:3px 10px;border-radius:12px}
+#tab0 .ap-b-body{font-size:13px;line-height:1.55;color:#333}
+#tab0 .ap-b-body b{color:#1F3864}
+#tab0 .ap-cav{font-size:11px;color:#999;font-style:italic}
+#tab0 .ap-foot{font-size:10.5px;color:#999;font-style:italic;margin-left:4px}
+#tab0 .ap-b-jumps{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
+#tab0 .ap-jump{font-size:11.5px;font-weight:600;color:#1F3864;background:#eef3fb;border:0.5px solid #d4e0f0;border-radius:6px;padding:5px 11px;cursor:pointer}
+#tab0 .ap-jump:hover{background:#dfeaf8}
+#tab0 .ap-cap-note{font-size:12.5px;color:#555;background:#f4faf6;border:0.5px solid #cce8d6;border-radius:8px;padding:10px 16px}
+#tab0 .ap-cap-note .ap-b-amt{font-size:16px;margin-right:6px}
+#tab0 .ap-linchpin{background:#fff8e1;border:0.5px solid #f0d68a;border-left:5px solid #e0a800;border-radius:8px;padding:14px 18px;margin-bottom:14px;font-size:13.5px;line-height:1.55;color:#5a4a1a}
+#tab0 .ap-linchpin b{color:#7a5c00}
+#tab0 .ap-lp-h{font-size:15px;font-weight:700;color:#7a5c00;margin-bottom:6px}
+#tab0 .ap-lp-note{font-size:11.5px;color:#998044;font-style:italic;margin-top:7px}
+#tab0 .ap-not{font-size:12.5px;line-height:1.5;color:#555;background:#fafbfc;border:0.5px solid #eee;border-radius:8px;padding:11px 16px;margin-bottom:14px}
+#tab0 .ap-not b{color:#1F3864}
+#tab0 .ap-toc{background:#1F3864;border-radius:8px;padding:14px 18px}
+#tab0 .ap-toc-h{color:#cdd8ec;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px}
+#tab0 .ap-toc .ap-jump{display:block;width:100%;text-align:left;margin-bottom:7px;background:#2a4675;color:#fff;border:0.5px solid #3a5688}
+#tab0 .ap-toc .ap-jump:hover{background:#34548a}
+/* Tab 7 — Portfolio lifecycle */
+#tab7 .pf-lead{font-size:13.5px;line-height:1.55;color:#333;background:#fdf6f5;border:0.5px solid #f0d7d3;border-radius:8px;padding:12px 16px;margin-bottom:14px}
+#tab7 .pf-lead b{color:#1F3864}
+#tab7 .pf-lead .nc{color:#C0392B}
+#tab7 .pf-segs{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
+#tab7 .pf-seg{background:#fff;border:0.5px solid #ddd;border-top:3px solid #ccc;border-radius:8px;padding:12px;text-align:center}
+#tab7 .pf-seg-n{font-size:26px;font-weight:700;color:#1F3864}
+#tab7 .pf-seg-l{font-size:11px;color:#666;margin:2px 0 4px;font-weight:600}
+#tab7 .pf-seg-d{font-size:12px;color:#999;font-variant-numeric:tabular-nums}
+#tab7 .pf-block{margin-top:14px}
+#tab7 .pf-block-h{font-size:12.5px;font-weight:700;margin-bottom:6px}
+#tab7 table.pf-tbl{width:100%;border-collapse:collapse}
+#tab7 .pf-tbl th{padding:7px 8px;font-size:10px;font-weight:600;color:#666;border-bottom:1.5px solid #ddd;text-align:right;background:#fafafa}
+#tab7 .pf-tbl th.l{text-align:left}
+#tab7 .pf-tbl td{padding:7px 8px;text-align:right;font-size:12px;border-bottom:0.5px solid #f0f0f0;font-variant-numeric:tabular-nums}
+#tab7 .pf-tbl td.l{text-align:left;font-weight:600;color:#222}
+#tab7 .pf-tbl td.nc{color:#C0392B}
+#tab7 .pf-tbl td.pc{color:#1a7a4a}
+#tab7 .pf-foot{font-size:10px;color:#999;font-weight:400;font-style:italic}
+#tab7 .pf-foot-note{font-size:11px;color:#888;font-style:italic;margin-top:12px;line-height:1.5}
+/* Tab 8 — Audit & Sources (provenance / methodology, lookup-optimized tables) */
+#tab8 .au-intro{font-size:13px;line-height:1.55;color:#444;background:#f7f8fb;border:0.5px solid #e6e9f0;border-radius:8px;padding:12px 16px;margin-bottom:14px}
+#tab8 .au-intro b{color:#1F3864}
+#tab8 .au-sec{font-size:11px;font-weight:700;color:#1F3864;text-transform:uppercase;letter-spacing:.05em;margin:2px 0 9px}
+#tab8 table.au-tbl{width:100%;border-collapse:collapse;margin-bottom:6px;font-variant-numeric:tabular-nums}
+#tab8 .au-tbl th{padding:7px 9px;font-size:10px;font-weight:700;color:#5a6172;border-bottom:1.5px solid #d8dde6;text-align:left;background:#fafbfd;text-transform:uppercase;letter-spacing:.03em;vertical-align:bottom}
+#tab8 .au-tbl td{padding:7px 9px;font-size:11.5px;color:#444;border-bottom:0.5px solid #eef0f4;vertical-align:top;line-height:1.4}
+#tab8 .au-tbl td.l{font-weight:600;color:#1f2a44}
+#tab8 .au-tbl td.v{font-weight:700;text-align:right;white-space:nowrap;color:#1f2a44}
+#tab8 .au-tbl td.v.neg{color:#C0392B} #tab8 .au-tbl td.v.pos{color:#1a7a4a}
+#tab8 .au-tbl td.d{color:#666;font-size:11px}
+#tab8 .au-tbl .pct{color:#8a8a8a;font-weight:400}
+#tab8 .au-tbl tr.tot td{border-top:1.5px solid #d8dde6;border-bottom:none;background:#fafbfd;font-weight:700}
+#tab8 .au-tbl tr.tot td.l{color:#1F3864}
+#tab8 .au-note{font-size:11px;color:#888;font-style:italic;margin:4px 0 0;line-height:1.5}
 /* Tab 4 — Data Summary (metric-major: office totals + per-metric explode) */
 #tab4{
   --t4-line:#e2e8f0;--t4-ink:#1f2a44;--t4-soft:#5a6b85;--t4-faint:#94a3b8;--t4-zebra:#f5f8fc;
@@ -1181,19 +1761,19 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 <div class="page">
 
 <div class="header">
-  <h1>Revenue Driver Analysis &mdash; __RANGE__</h1>
+  <h1>Revenue Driver Analysis &mdash; __RANGE____ASOF__</h1>
   <p>Rev/Day = $/Visit &times; Visits/Dr Day &times; Dr Days/Day &nbsp;&bull;&nbsp; 76 offices &nbsp;&bull;&nbsp; __NPROV__ named providers &nbsp;&bull;&nbsp; Providers filtered to material contributors only: cumulative 90% of office production + 2% individual floor (ranked by peak year production &mdash; captures new providers) &nbsp;&bull;&nbsp; Noise providers (temp, insurance, unassigned, etc.) excluded</p>
 </div>
 
 <!-- TOP NAV TABS -->
 <div class="nav-tabs">
-  <button class="nav-tab on" id="navTab1" onclick="switchTab(1)">&#127970; Office Analysis</button>
+  __APEX_NAVTAB__<button class="nav-tab on" id="navTab1" onclick="switchTab(1)">&#127970; Office Analysis</button>
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
   <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Doctor Rank View</button>
   <button class="nav-tab" id="navTab4" onclick="switchTab(4)">&#128203; Data Summary</button>
-  <button class="nav-tab" id="navTab5" onclick="switchTab(5)">&#128138; Mix Shift</button>__REALIZATION_NAVTAB__
+  <button class="nav-tab" id="navTab5" onclick="switchTab(5)">&#128138; Mix Shift</button>__REALIZATION_NAVTAB____PORTFOLIO_NAVTAB____AUDIT_NAVTAB__
 </div>
-
+__APEX_TAB__
 <!-- ═══════════════════════════════════════════════════
      TAB 1 — OFFICE VIEW
 ════════════════════════════════════════════════════ -->
@@ -1460,17 +2040,21 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
 </div>
 
 __REALIZATION_TAB__
+__PORTFOLIO_TAB__
+__AUDIT_TAB__
 <div class="footer">Generated from source data &mdash; __RANGE__ &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
 </div>
 
 <script>
-var MO=__MO_LABELS__;            // active-month labels (partial month carries " MTD")
+var MO=__MO_LABELS__;            // active-month labels (partial month carries " (thru NN)")
 var MTD_LABEL=__MTD_LABEL__;     // e.g. "Jun" when a partial month is active, else ""
+var MTD_DISPLAY=__MTD_DISPLAY__; // live through-date e.g. "June 16, 2026" (""=no ThroughDate)
+var MTD_CHIP=__MTD_CHIP__;       // compact partial-month chip e.g. "thru 16" (fallback "MTD")
 var MTD_ON=__MTD_ACTIVE__;       // true when the latest active month is month-to-date
 var WD25=__WD25__,WD26=__WD26__;
 function lastCp(c){return c[c.length-1];}                         // latest YTD checkpoint
 function moHeaders(){return MO.map(function(m){return '<th>YTD '+m+'</th>';}).join('');}
-function mtdBanner(){return MTD_ON?'<div>&#9888; '+MTD_LABEL+' (MTD) is a partial month &mdash; KPI cards, YTD totals, and ordering include a month-to-date figure, not a full month.</div>':'';}
+function mtdBanner(){return MTD_ON?'<div>&#9888; '+MTD_LABEL+(MTD_DISPLAY?' (data through '+MTD_DISPLAY+')':' (MTD)')+' is a partial month &mdash; KPI cards, YTD totals, and ordering include a month-to-date figure, not a full month.</div>':'';}
 
 var D=__D_DATA__;
 var OTHER=__OTHER_DATA__;
@@ -2362,7 +2946,7 @@ function t5Anchor(vArr1,vArr2,countsObj){
     +(r25==null?'n/a':r25.toFixed(3))+'<span class="t5aarr">&rarr;</span>'+(r26==null?'n/a':r26.toFixed(3))+'</span>'+t5ratioChip(r25,r26)+'</div>';
   if(MTD_ON){var j25=vArr1[MYT-1],j26=vArr2[MYT-1],jd=j26-j25,jp=(j25>0)?(jd/j25*100):null;
     var jc=(jp==null)?'':' <span class="'+(jd<0?'t5down':'t5up')+'">'+(jd<0?'&#9660;':'&#9650;')+' '+Math.abs(Math.round(jd)).toLocaleString()+' ('+Math.abs(jp).toFixed(0)+'%)</span>';
-    s+='<div class="t5asub">'+MO[MYT-1]+' (MTD), partial: '+c0(j25)+' &rarr; '+c0(j26)+jc+' visits &mdash; excluded from the matched YoY</div>';}
+    s+='<div class="t5asub">'+MO[MYT-1]+', partial: '+c0(j25)+' &rarr; '+c0(j26)+jc+' visits &mdash; excluded from the matched YoY</div>';}
   return s+'</div>';
 }
 var T5_CAP='<div class="t5cap">Volume shows the real direction. A rising per-100 rate isn&rsquo;t growth &mdash; visits fell YoY, so fewer procedures over fewer visits can still raise the rate. Trust the Volume columns for up/down.</div>';
@@ -2517,7 +3101,7 @@ function t5Month(rec,g,st){
   }
   var glab=(g===T5_OTHER)?T5_OTHER_LABEL:g;
   var h='<tr><th class="l">'+glab+' &middot; by month</th>';
-  for(var i=0;i<MYT;i++)h+='<th>'+MO[i]+(MTD_ON&&i===MYT-1?' <span class="t5momtd">MTD</span>':'')+'</th>';
+  for(var i=0;i<MYT;i++)h+='<th>'+MO[i]+(MTD_ON&&i===MYT-1?' <span class="t5momtd">'+MTD_CHIP+'</span>':'')+'</th>';
   h+='</tr>';
   var b='';
   b+=rowC('t5cntrow','Provider count 2025',rec.counts[g].y1);
@@ -2572,18 +3156,24 @@ function t5Bind(){
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(n){
   currentTab=n;
+  var _t0=document.getElementById('tab0'); if(_t0){_t0.style.display=n===0?'':'none';}
   document.getElementById('tab1').style.display=n===1?'':'none';
   document.getElementById('tab2').style.display=n===2?'':'none';
   document.getElementById('tab3').style.display=n===3?'':'none';
   document.getElementById('tab4').style.display=n===4?'':'none';
   document.getElementById('tab5').style.display=n===5?'':'none';
   var _t6=document.getElementById('tab6'); if(_t6){_t6.style.display=n===6?'':'none';}
+  var _t7=document.getElementById('tab7'); if(_t7){_t7.style.display=n===7?'':'none';}
+  var _t8=document.getElementById('tab8'); if(_t8){_t8.style.display=n===8?'':'none';}
+  var _n0=document.getElementById('navTab0'); if(_n0){_n0.className='nav-tab'+(n===0?' on':'');}
   document.getElementById('navTab1').className='nav-tab'+(n===1?' on':'');
   document.getElementById('navTab2').className='nav-tab'+(n===2?' on':'');
   document.getElementById('navTab3').className='nav-tab'+(n===3?' on':'');
   document.getElementById('navTab4').className='nav-tab'+(n===4?' on':'');
   document.getElementById('navTab5').className='nav-tab'+(n===5?' on':'');
   var _n6=document.getElementById('navTab6'); if(_n6){_n6.className='nav-tab'+(n===6?' on':'');}
+  var _n7=document.getElementById('navTab7'); if(_n7){_n7.className='nav-tab'+(n===7?' on':'');}
+  var _n8=document.getElementById('navTab8'); if(_n8){_n8.className='nav-tab'+(n===8?' on':'');}
 }
 
 // Realization tab office slicer — show the selected pre-rendered pane (table + KPIs +
@@ -2625,6 +3215,8 @@ renderT4();
 t5OfficeOptions();
 t5ProviderOptions();
 renderT5();
+// Diagnostic apex is the landing view when present; otherwise Office Analysis (graceful).
+if(document.getElementById('tab0')){switchTab(0);}
 </script>
 </body>
 </html>
