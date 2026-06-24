@@ -7,6 +7,8 @@ output/
 
 # Data extracts & backups — volatile/large, not version-controlled.
 # Covers the canonical X. DAX_ProcedureMix.xlsx, the W re-pull, and *.pre_*.bak
-# promotion backups. (A. and B. were tracked before this rule and stay tracked.)
+# promotion backups. File A (A.2025_2026_Data_Updated.xlsx) was untracked so the
+# monthly data refresh stays out of git (git tracks code; data lives in data/).
+# B.Provider_Map_Prod.xlsx remains tracked (stable reference map, rarely changes).
 data/*.xlsx
 data/*.bak
