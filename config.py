@@ -8,7 +8,7 @@ YEAR_2 = 2026
 # The in-progress, month-to-date (partial) month — flagged as "<Mon> MTD" across all
 # tabs so a partial month can't be misread as a full-month figure. None when every
 # active month is a full month.
-MTD_MONTH = 6
+MTD_MONTH = None   # June is now complete (ThroughDate 6/30); no partial month in the window
 
 WORKING_DAYS = {
     (1, 2025): 19.0,
@@ -16,13 +16,13 @@ WORKING_DAYS = {
     (3, 2025): 18.6,
     (4, 2025): 19.6,
     (5, 2025): 18.0,
-    (6, 2025): 10.8,   # June MTD — elapsed working days for 6/1-6/17 (independently 10.8)
+    (6, 2025): 18.6,   # full June (Tredence Company Summary Report)
     (1, 2026): 18.0,
     (2, 2026): 17.6,
     (3, 2026): 19.6,
     (4, 2026): 19.6,
     (5, 2026): 17.0,
-    (6, 2026): 10.8,   # June MTD — elapsed working days for 6/1-6/16 (independently 10.8)
+    (6, 2026): 19.6,   # full June (Tredence Company Summary Report)
 }
 
 # Set to (month_num, year, days_passed) when a month is in progress
