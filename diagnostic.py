@@ -178,7 +178,8 @@ def spv_subsplit(dataset=None):
         "wo25": wo25, "wo26": wo26, "d_wo": d_wo,
         "gross26": g2,
         "writeoff_component": writeoff_component,    # positive $ of additional write-offs
-        "basis": "all-in (all 96 offices), File-A gross/adj, closed Jan–May",
+        "basis": (f"all-in (all 96 offices), File-A gross/adj, "
+                  f"{pipeline.MONTH_LABELS[closed[0]]}–{pipeline.MONTH_LABELS[closed[-1]]}"),
     }
 
 
@@ -251,6 +252,29 @@ def realz_examples(dataset=None):
     return out
 
 
+def anchor_grid():
+    """Live YTD-cumulative total-company Net-Prod Rev/Day anchor (net production / working
+    days) that sits above the waterfall. ALL-IN, and it IS the Office Analysis MDP-Consolidated
+    row — built from the same build_consolidated() checkpoints, so it ties to that tab by
+    construction. DYNAMIC month set (thru-Jan … thru-<last month>; Jul, Aug… auto-appear on
+    future pulls). The final (thru-<last>) column is the YTD figure whose ΔNetProd
+    (np26 - np25) reconciles to the waterfall total."""
+    cps = pipeline.build_consolidated()["checkpoints"]
+    rows = [{"month": cp["month_num"], "label": cp["label"],
+             "rd25": cp["rd25"], "rd26": cp["rd26"], "shift": cp["drd"]} for cp in cps]
+    first, last = rows[0], rows[-1]
+    accel = (last["shift"] / first["shift"]) if first["shift"] else None
+    dnp = cps[-1]["np26"] - cps[-1]["np25"]        # ties to waterfall total
+    return {
+        "year_1": config.YEAR_1, "year_2": config.YEAR_2,
+        "rows": rows,
+        "first_month": first["month"], "last_month": last["month"],
+        "first_shift": first["shift"], "last_shift": last["shift"],
+        "final_rd25": last["rd25"], "final_rd26": last["rd26"], "final_shift": last["shift"],
+        "accel": accel, "dnp": dnp,
+    }
+
+
 def apex_payload(dataset=None):
     """Everything the Diagnostic apex + Portfolio tabs need — bundled, all live-derived,
     keyed so report.py only formats. `dataset` is the already-built dollar dataset."""
@@ -268,6 +292,7 @@ def apex_payload(dataset=None):
         "realz": realz_examples(dataset),
         "classes": cls,
         "by_bucket": by,
+        "anchor": anchor_grid(),
         "year_1": config.YEAR_1, "year_2": config.YEAR_2,
     }
 
@@ -289,7 +314,9 @@ def main():
     # independent total: every office's active Δ
     indep_total = sum(r["d_active"] for r in cls)
 
-    print(f"\nWindow: active {wf['window']['active']} (Jun = MTD/partial).  "
+    _mtd = wf['window']['mtd']
+    print(f"\nWindow: active {wf['window']['active']} "
+          f"({'month ' + str(_mtd) + ' = MTD/partial' if _mtd else 'all full months'}).  "
           f"Operating offices: {wf['n_operating']} of {len(cls)}")
     lv = wf["operating_levels"]
     print(f"Operating factor levels (active):  $/Visit {lv['spv'][0]:.2f}->{lv['spv'][1]:.2f}  "
