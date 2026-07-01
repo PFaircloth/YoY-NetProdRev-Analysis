@@ -199,6 +199,18 @@ Recommend dedicated project sprint.
   so the company "primary lever" can be read as genuine price/volume movement vs. accounting
   cleanup. Observation/feature idea — don't build the split with the first tied-to-KPI row.
 
+## Working days Jan–Jun — RESOLVED (equal both years; decline is all-rate)
+
+**Jan–Jun working days are equal both years (111.4 = 111.4)**, so the −$8.05M half-year
+decline is **entirely a rate story** — there is no working-day timing effect.
+
+An earlier stale partial-June config value (`WORKING_DAYS[(6,·)] = 10.8`, the June-MTD figure)
+produced totals of 103.6 / 102.6 and a **phantom −$0.75M "lost day"** — an artifact, not a
+real calendar effect. **Resolved** by completing June to full-month values (18.6 / 19.6,
+Tredence Company Summary Report) and setting `MTD_MONTH = None`; June is now complete across
+every window (Rev/Day, realization, mix volume). The walk line is single-factor:
+−$72,273/day × 111.4 working days ≈ −$8.05M.
+
 ## Other Backlog Items
 
 - ~~Partial month YTD support — config flag for Days Passed as denominator~~ **DONE**
