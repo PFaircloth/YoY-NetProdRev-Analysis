@@ -1,4 +1,5 @@
 import json
+import calendar
 import config
 import pipeline
 from mix_dollars import (realization_diagnostic, tag_for, monthly_realization_trend,
@@ -9,6 +10,7 @@ import diagnostic
 # source of truth pipeline.get_through_date(); every flag site below reads it, none recompute.
 # All helpers fall back to the original date-less "MTD" wording when ThroughDate is absent.
 _THRU = {"raw": None, "display": None, "ordinal": None, "day": None}
+_MTD_ON = False   # set once in generate_html(); True only when the latest active month is partial
 
 
 def _mtd_suffix():
@@ -429,9 +431,11 @@ def _rz_net_explode(t, group):
              f'<tr><td class="l">{y2y}</td>{r26}</tr>'
              f'<tr><td class="l">&Delta;</td>{rdd}</tr></tbody></table>')
 
+    _win = (f'{lab[closed[0]]}&ndash;{lab[closed[-1]]} matched, {lab[mtd]} {_mtd_phrase()} (provisional)'
+            if mtd is not None else f'{lab[mths[0]]}&ndash;{lab[mths[-1]]}')
     return (f'<div class="rz-exp-h">{group} &mdash; Net / procedure by month '
             f'(<span style="color:{_RZ_C26}">{y2y}</span> vs <span style="color:{_RZ_C25}">{y1y}</span>; '
-            f'{lab[closed[0]]}&ndash;{lab[closed[-1]]} matched, {lab[mtd]} {_mtd_phrase()} (provisional))</div>'
+            f'{_win})</div>'
             f'<div class="rzx-wrap">{svg}</div>{table}')
 
 
@@ -497,7 +501,7 @@ def _rz_monthly_card(t):
     <div class="section-lbl">Is it steady, accelerating, or recent? &mdash; Monthly write-off-rate trend</div>
     <div class="hint">Same population and corrected basis as the view above &mdash; read as a <b>shape</b>.
       Company/office total only (procedure-level offered below; <b>provider</b>-monthly deliberately excluded
-      as too noisy on small per-month counts). Closed {lab[closed[0]]}&ndash;{lab[closed[-1]]} is the read; {lab[mtd]} is provisional ({_mtd_phrase()}).</div>
+      as too noisy on small per-month counts). {(f"Closed {lab[closed[0]]}&ndash;{lab[closed[-1]]} is the read; {lab[mtd]} is provisional ({_mtd_phrase()})") if mtd is not None else f"{lab[mths[0]]}&ndash;{lab[mths[-1]]} is the read (all full months)"}.</div>
     <div class="rzm-callout">The monthly shape shows {read}.</div>
     <div class="rzm-wrap">{_rz_trend_svg(t)}
       <div class="rzm-key">
@@ -580,6 +584,12 @@ def _ap_M(x):
     return ("&minus;" if x < 0 else "+") + f"${abs(x)/1e6:.2f}M"
 
 
+def _ap_M1(x):
+    """1-decimal $M — the rounded DISPLAY used for the total (header/total bar/walk), so the
+    apex reads a single consistent $8.1M. Underlying figures stay exact."""
+    return ("&minus;" if x < 0 else "+") + f"${abs(x)/1e6:.1f}M"
+
+
 def _ap_k(x):
     return ("&minus;" if x < 0 else "+") + f"${abs(x)/1e3:,.0f}K"
 
@@ -630,7 +640,7 @@ def _apex_waterfall_svg(b, total):
     cx = L + (n - 0.5) * slot
     yt, x = Y(total), cx - bw / 2
     s.append(f'<rect x="{x:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{yt-y0:.1f}" rx="2" fill="{_AP_NAVY}"/>')
-    s.append(f'<text x="{cx:.1f}" y="{yt+18:.1f}" class="wf-val" fill="{_AP_NAVY}">{_ap_M(total)}</text>')
+    s.append(f'<text x="{cx:.1f}" y="{yt+18:.1f}" class="wf-val" fill="{_AP_NAVY}">{_ap_M1(total)}</text>')
     s.append(f'<text x="{cx:.1f}" y="{H-B+22:.1f}" class="wf-cat wf-tot">Total</text>')
     s.append(f'<line x1="{px:.1f}" y1="{pyv:.1f}" x2="{x:.1f}" y2="{pyv:.1f}" class="wf-conn"/>')
     s.append('</svg>')
@@ -645,6 +655,68 @@ def _apex_navtab(apex):
 def _portfolio_navtab(apex):
     return ('' if apex is None else
             '\n  <button class="nav-tab" id="navTab7" onclick="switchTab(7)">&#127970; Portfolio</button>')
+
+
+def _ap_rd(x):
+    """Rev/Day dollar, whole, no sign (level rows)."""
+    return "&mdash;" if x is None else f"${x:,.0f}"
+
+
+def _ap_rd_shift(x):
+    """Rev/Day shift dollar, whole, signed (shift row)."""
+    if x is None:
+        return "&mdash;"
+    return ("&minus;" if x < 0 else "+") + f"${abs(x):,.0f}"
+
+
+def _apex_anchor_grid(a, total):
+    """The anchor grid above the waterfall: total-company YTD-cumulative Net-Prod Rev/Day
+    (2025 / 2026 / Shift) by 'thru-<month>', then the acceleration + walk lines that lead into
+    the waterfall. All values live from diagnostic.anchor_grid() — which IS the Office Analysis
+    MDP-Consolidated row (build_consolidated), so the grid ties to that tab; the final-column
+    ΔNetProd ties to the waterfall total. Dynamic month set."""
+    if a is None or not a["rows"]:
+        return ""
+    rows = a["rows"]
+    RED = _AP_OPS
+    y1, y2 = a["year_1"], a["year_2"]
+    thm = "".join(f'<th style="padding:3px 8px;text-align:right;font-weight:600;color:#5a6172;white-space:nowrap">thru {r["label"]}</th>' for r in rows)
+
+    def _lvl_row(name, key):
+        tds = "".join(f'<td style="padding:3px 8px;text-align:right;color:#2b2f38;font-variant-numeric:tabular-nums">{_ap_rd(r[key])}</td>' for r in rows)
+        return f'<tr><td style="padding:3px 12px 3px 2px;text-align:left;font-weight:600;color:#5a6172;white-space:nowrap">{name}</td>{tds}</tr>'
+
+    tds_sh = "".join(f'<td style="padding:4px 8px;text-align:right;font-weight:700;color:{RED};font-variant-numeric:tabular-nums">{_ap_rd_shift(r["shift"])}</td>' for r in rows)
+    shift_row = (f'<tr style="border-top:1px solid #e6e9f0"><td style="padding:4px 12px 4px 2px;text-align:left;'
+                 f'font-weight:700;color:{RED};white-space:nowrap">Shift ({y2}&minus;{y1})</td>{tds_sh}</tr>')
+
+    # framing lines (live)
+    def _k(x):
+        return ("&minus;" if x < 0 else "+") + f"${abs(x)/1e3:,.0f}K"
+    jan = calendar.month_name[a["first_month"]]; jun = calendar.month_name[a["last_month"]]
+    grew = "more than doubled" if (a["accel"] and a["accel"] >= 2) else "widened"
+    accel = (f'<div style="font-size:12px;line-height:1.5;color:#2b2f38;margin:9px 0 0">'
+             f'The daily gap <b>{grew}</b> &mdash; {_k(a["first_shift"])} in {jan} to '
+             f'<b style="color:{RED}">{_k(a["last_shift"])}</b> in {jun}.</div>')
+    walk = (f'<div style="font-size:12px;line-height:1.5;color:#2b2f38;margin:6px 0 0">'
+            f'{y2}&rsquo;s daily production trails {y1} by <b style="color:{RED}">${abs(a["final_shift"])/1e3:,.0f}K/day</b> '
+            f'&mdash; <b>${abs(total)/1e6:.1f}M</b> in total for the half-year. Here&rsquo;s where it went:</div>')
+
+    return f"""
+  <div class="card" style="padding:12px 16px;margin:0 0 12px">
+    <div class="section-lbl">The YoY anchor &mdash; total-company Net-Prod Rev/Day (YTD-cumulative, net production &divide; working days) &middot; matches Office Analysis</div>
+    <table style="border-collapse:collapse;font-size:12px;margin:8px 0 0;width:100%">
+      <thead><tr><th></th>{thm}</tr></thead>
+      <tbody>
+        {_lvl_row(f'{y1} Rev/Day', 'rd25')}
+        {_lvl_row(f'{y2} Rev/Day', 'rd26')}
+        {shift_row}
+      </tbody>
+    </table>
+    {accel}
+    {walk}
+  </div>
+"""
 
 
 def _apex_tab(apex):
@@ -692,10 +764,10 @@ def _apex_tab(apex):
      TAB 0 — DIAGNOSTIC APEX (where the YoY decline went)
 ════════════════════════════════════════════════════ -->
 <div id="tab0">
-  <div class="ap-lead">Net production is down <b>${abs(total)/1e6:.1f}M</b> YoY <span class="ap-mtd">{('(through ' + _THRU['display'] + ' &mdash; ' + _THRU['raw'].strftime('%B') + ' is a partial month)') if _THRU['display'] else '(through June &mdash; June is month-to-date/partial)'}</span>. Here&rsquo;s exactly where it went &mdash; and the one lever that moves the most.</div>
+  <div class="ap-lead">Net production is down <b>${abs(total)/1e6:.1f}M</b> YoY <span class="ap-mtd">{(('(through ' + _THRU['display'] + ' &mdash; ' + _THRU['raw'].strftime('%B') + ' is a partial month)') if _MTD_ON else ('(through ' + _THRU['display'] + ')')) if _THRU['display'] else '(through June)'}</span>. Here&rsquo;s exactly where it went &mdash; and the one lever that moves the most.</div>
 
   <div style="font-size:11px;line-height:1.5;color:#7a8190;background:#f7f8fb;border:0.5px solid #e6e9f0;border-radius:6px;padding:8px 12px;margin:0 0 14px"><b style="color:#5a6172">Basis:</b> Diagnostic figures are <b>all-in</b> (full population, all 96 offices) to match the ${abs(total)/1e6:.1f}M total. Detail tabs show <b>material contributors</b> (~90% of production). Per-procedure figures, where noted, come from the material-contributor detail &mdash; the only level at which procedure-level data exists.</div>
-
+{_apex_anchor_grid(apex.get("anchor"), total)}
   <div class="card ap-hero">
     <div class="section-lbl">Where the ${abs(total)/1e6:.1f}M went &mdash; production decline, by owner</div>
     {_apex_waterfall_svg(b, total)}
@@ -803,7 +875,7 @@ def _portfolio_tab(apex):
 <div id="tab7" style="display:none">
   <div class="card">
     <div class="section-lbl">Portfolio lifecycle &mdash; the {_ap_k(apex['waterfall']['bars']['portfolio']).replace('&minus;','&minus;').lstrip('+')} bar, explained</div>
-    <div class="pf-lead"><b>{_ap_k(wind_sum).lstrip('+')}</b> of production capacity wound down, only <b>{_ap_k(backfill)}</b> backfilled &mdash; a net <b class="nc">{_ap_k(portfolio_net)}</b> pipeline gap. Every office below is classified <b>live</b> from the source each build (no hardcoded list); liveness is decided on the matched Jan&ndash;May window.</div>
+    <div class="pf-lead"><b>{_ap_k(wind_sum).lstrip('+')}</b> of production capacity wound down, only <b>{_ap_k(backfill)}</b> backfilled &mdash; a net <b class="nc">{_ap_k(portfolio_net)}</b> pipeline gap. Every office below is classified <b>live</b> from the source each build (no hardcoded list); liveness is decided on the matched full-month window (both years complete).</div>
     <div style="font-size:11px;font-weight:700;letter-spacing:.3px;color:#7a8190;text-transform:uppercase;margin:2px 0 7px">Office lifecycle &mdash; {len(cls)} offices classified</div>
     <div class="pf-segs">
       {seg('Operating', op, _AP_NAVY)}
@@ -895,12 +967,13 @@ def _audit_tab(apex):
                  f'<td class="d" colspan="2">operating + wind-down + ramp + run-off + dormant &mdash; '
                  f'the full population behind the {_ap_M(total)} total</td></tr>')
 
+    _asof_txt = (f'both years complete through {_THRU["display"]}' if _THRU["display"]
+                 else 'both years complete, no partial month')
     win_rows = (
-        f'<tr><td class="l">Matched &mdash; {CW}</td><td class="d">Both years complete (no partial month)</td>'
-        f'<td class="d">Office liveness classification &middot; all-in write-off rate &middot; per-procedure realization</td></tr>'
-        f'<tr><td class="l">Active &mdash; {AW}</td><td class="d">{pipeline.MONTH_LABELS[mtd]} is partial &mdash; '
-        f'{("data through " + _THRU["display"]) if _THRU["display"] else "month-to-date"}</td>'
-        f'<td class="d">Headline {_ap_M(total)} &middot; Shapley bars &middot; visit &amp; new-patient counts</td></tr>')
+        f'<tr><td class="l">Analysis window &mdash; {AW}</td>'
+        f'<td class="d">{_asof_txt[0].upper() + _asof_txt[1:]} &mdash; one matched full-month window</td>'
+        f'<td class="d">Headline {_ap_M(total)} &amp; Shapley bars &middot; office liveness classification &middot; '
+        f'all-in write-off rate &middot; per-procedure realization &middot; visit &amp; new-patient counts</td></tr>')
 
     src_rows = (
         f'<tr><td class="l">File&nbsp;A</td>'
@@ -935,8 +1008,9 @@ def _audit_tab(apex):
                    f"{y1} ${r['np25']:,.0f} &rarr; {y2} ${r['np26']:,.0f}", vc(r["d_active"]))
 
     fig_rows = "".join([
-        row("Total net-production decline", _ap_M(total), FA, AA, AW,
-            f"Net production {y1} &minus; {y2}; &Sigma; every office&rsquo;s YoY &Delta; (zero residual)", vc(total)),
+        row("Total net-production decline", _ap_money(total), FA, AA, AW,
+            f"Net production {y1} &minus; {y2}; &Sigma; every office&rsquo;s YoY &Delta; (zero residual). "
+            f"<b>The Diagnostic apex rounds this to {_ap_M1(total)}; the exact figure is {_ap_money(total)}.</b>", vc(total)),
         row("Throughput bar", _ap_M(b["throughput"]), FA, OP, AW,
             "Shapley on the identity $/Visit &times; Visits/DrDay &times; DoctorDays", vc(b["throughput"])),
         row("$/Visit bar", _ap_M(b["spv"]), FA, OP, AW,
@@ -1233,6 +1307,8 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
     months = pipeline.get_active_months()
     mtd = config.MTD_MONTH
     mtd_active = mtd in months and months[-1] == mtd   # partial month is the latest
+    global _MTD_ON
+    _MTD_ON = mtd_active
 
     # Through-date: report-wide as-of, read LIVE from File A's ThroughDate column (the one
     # computation; every flag site reads _THRU). Falls back to date-less wording if absent.
