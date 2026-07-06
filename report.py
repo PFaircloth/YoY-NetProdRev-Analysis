@@ -607,7 +607,7 @@ def _apex_waterfall_svg(b, total):
     by owner, plus a reference Total bar. All geometry derives from the live $ values."""
     cats = [("Throughput", b["throughput"], _AP_OPS, "Ops"),
             ("$/Visit", b["spv"], _AP_REV, "Rev cycle + Ops"),
-            ("Capacity", b["capacity"], _AP_CAP, "offset"),
+            ("Capacity", b["capacity"], _AP_CAP, "Ops / Dev"),
             ("Portfolio", b["portfolio"], _AP_DEV, "Development")]
     W, H, L, R, T, B = 900, 400, 78, 24, 38, 84
     pw, ph = W - L - R, H - T - B
@@ -724,6 +724,7 @@ def _apex_tab(apex):
         return ""
     wf = apex["waterfall"]; b = wf["bars"]; total = wf["total"]
     ss = apex["spv"]; th = apex["throughput"]; by = apex["by_bucket"]
+    est = apex["established"]                        # live established-provider productivity + day split
     wo = ss["writeoff_component"]
     spv_other = b["spv"] + wo                       # residual after the write-off component
     wind = by.get("wind-down", []); ramp = by.get("ramp", [])
@@ -766,7 +767,11 @@ def _apex_tab(apex):
 <div id="tab0">
   <div class="ap-lead">Net production is down <b>${abs(total)/1e6:.1f}M</b> YoY <span class="ap-mtd">{(('(through ' + _THRU['display'] + ' &mdash; ' + _THRU['raw'].strftime('%B') + ' is a partial month)') if _MTD_ON else ('(through ' + _THRU['display'] + ')')) if _THRU['display'] else '(through June)'}</span>. Here&rsquo;s exactly where it went &mdash; and the one lever that moves the most.</div>
 
-  <div style="font-size:11px;line-height:1.5;color:#7a8190;background:#f7f8fb;border:0.5px solid #e6e9f0;border-radius:6px;padding:8px 12px;margin:0 0 14px"><b style="color:#5a6172">Basis:</b> Diagnostic figures are <b>all-in</b> (full population, all 96 offices) to match the ${abs(total)/1e6:.1f}M total. Detail tabs show <b>material contributors</b> (~90% of production). Per-procedure figures, where noted, come from the material-contributor detail &mdash; the only level at which procedure-level data exists.</div>
+  <div style="font-size:11px;line-height:1.5;color:#7a8190;background:#f7f8fb;border:0.5px solid #e6e9f0;border-radius:6px;padding:8px 12px;margin:0 0 14px">
+    <div><b style="color:#5a6172">Basis:</b> Diagnostic figures are <b>all-in</b> (full population, all 96 offices) to match the ${abs(total)/1e6:.1f}M total. Detail tabs show <b>material contributors</b> (~90% of production).</div>
+    <div style="margin-top:3px">Per-procedure figures, where noted, come from the material-contributor detail &mdash; the only level at which procedure-level data exists.</div>
+    <div style="margin-top:3px;color:#9aa0ad"><sup>&dagger;</sup> New-patient and hygiene visit counts are sourced from the Tredence Company Summary Report (File&nbsp;A).</div>
+  </div>
 {_apex_anchor_grid(apex.get("anchor"), total)}
   <div class="card ap-hero">
     <div class="section-lbl">Where the ${abs(total)/1e6:.1f}M went &mdash; production decline, by owner</div>
@@ -774,7 +779,7 @@ def _apex_tab(apex):
     <div class="ap-wf-key">
       <span><i style="background:{_AP_OPS}"></i>Throughput &middot; Ops</span>
       <span><i style="background:{_AP_REV}"></i>$/Visit &middot; Revenue cycle</span>
-      <span><i style="background:{_AP_CAP}"></i>Capacity &middot; offset</span>
+      <span><i style="background:{_AP_CAP}"></i>Capacity &middot; transitional</span>
       <span><i style="background:{_AP_DEV}"></i>Portfolio &middot; Development</span>
       <span class="ap-wf-note">Exact decomposition (Shapley) &mdash; the four bars sum to the total, no residual.</span>
     </div>
@@ -783,7 +788,7 @@ def _apex_tab(apex):
   <div class="ap-buckets">
     <div class="ap-bucket" style="border-left-color:{_AP_OPS}">
       <div class="ap-b-top"><span class="ap-b-amt">{_ap_M(b['throughput'])}</span><span class="ap-b-title">Throughput &mdash; fewer visits</span><span class="ap-b-owner" style="background:{_AP_OPS}">Owner: Ops</span></div>
-      <div class="ap-b-body">Fewer visits coming through the door &mdash; new patients <b>{np_pct:+.0f}%</b>, hygiene visits <b>{hv_pct:+.1f}%</b>. <b>Not</b> treatment intensity (procedures-per-visit is flat). This is a demand / recall problem.</div>
+      <div class="ap-b-body">Fewer visits coming through the door &mdash; new patients <b>{np_pct:+.1f}%</b> <span class="ap-cnt">({th['newpat25']:,.0f} &rarr; {th['newpat26']:,.0f})</span><sup class="ap-dag">&dagger;</sup>, hygiene visits <b>{hv_pct:+.1f}%</b> <span class="ap-cnt">({th['hyg_v25']:,.0f} &rarr; {th['hyg_v26']:,.0f})</span><sup class="ap-dag">&dagger;</sup>. <b>Not</b> treatment intensity (procedures-per-visit is flat). This is a demand / recall problem.</div>
       <div class="ap-b-jumps">{_ap_jump(5,'Mix Shift (procedure shape)')}{_ap_jump(1,'New-patient detail &middot; Office Analysis')}</div>
     </div>
 
@@ -803,7 +808,17 @@ def _apex_tab(apex):
       <div class="ap-b-jumps">{_ap_jump(7,'Lifecycle segmentation &middot; Portfolio')}</div>
     </div>
 
-    <div class="ap-cap-note"><span class="ap-b-amt" style="color:{_AP_CAP}">{_ap_M(b['capacity'])}</span> <b>Capacity</b> &mdash; doctor-days deployed are slightly <b>up</b>, a small positive offset. Not a problem bucket.</div>
+    <div class="ap-bucket" style="border-left-color:{_AP_CAP};background:#f6fbf8">
+      <div class="ap-b-top"><span class="ap-b-amt" style="color:{_AP_CAP}">{_ap_M(b['capacity'])}</span><span class="ap-b-title">Capacity &mdash; modest offset, <i>transitional</i></span><span class="ap-b-owner" style="background:{_AP_CAP}">Owner: Ops / Development</span></div>
+      <div class="ap-b-body">Staffing rose &mdash; operating <b>doctor-days +{est['dd_op_delta']:.0f}</b> ({est['dd_op1']:,.0f} &rarr; {est['dd_op2']:,.0f}). But this is <b>net roster churn, not intensification</b>: new / ramping providers added <b>+{est['split']['new']:,.0f} days</b> backfilling <b>&minus;{abs(est['split']['departed']):,.0f}</b> lost to departures, while established providers worked <b>&minus;{abs(est['split']['established']):,.0f}</b> fewer. Capacity turned positive because <b>new providers are being added and are still ramping &mdash; not yet a production gain</b>. Whether it becomes real recovery depends on those providers ramping to replace departed production. <b>A trend to watch.</b></div>
+      <div class="ap-b-jumps">{_ap_jump(1,'Provider ramp &middot; Office Analysis')}</div>
+    </div>
+
+    <div class="ap-bucket" style="border-left-color:{_AP_CAP};background:#fbfcfe">
+      <div class="ap-b-body" style="margin:0"><b>The sharper read: a per-day performance problem, not a staffing shortage.</b> Even the <b>{est['n_established']} established providers</b> who produced in <b>both</b> years did <b>{est['rate_pct']:+.1f}% less per doctor-day</b> (${est['rate1']:,.0f} &rarr; ${est['rate2']:,.0f}). Offices worked <i>more</i> days, yet each day produced less. <span class="ap-cav">(established = positive net production in both Jan&ndash;Jun periods, temps / placeholders excluded; net prod per doctor-day, operating offices.)</span></div>
+    </div>
+
+    <div class="ap-cap-note"><b>Calendar vs staffing &mdash; two different denominators:</b> business working-days were <b>equal</b> both years (<b>{est['cal_days1']} = {est['cal_days2']}</b>) &mdash; the basis for the Rev/Day anchor above; staffed <b>doctor-days rose +{est['dd_op_delta']:.0f}</b> &mdash; the basis for this Capacity bar. Equal calendar with more labour deployed is not a conflict.</div>
   </div>
 
   <div class="ap-linchpin">
@@ -813,7 +828,7 @@ def _apex_tab(apex):
     <div class="ap-lp-note">Hygiene&rsquo;s <i>direct</i> dollar loss is <b>~{_ap_k(hyg_direct)}</b> &mdash; meaningful, but a fraction of the {_ap_M(b['throughput'])} throughput bar. Its real value is as the <b>funnel / lever</b>, not its own line.</div>
   </div>
 
-  <div class="ap-not"><b>What it&rsquo;s NOT:</b> not pricing (gross-per-procedure held or rose), not procedure mix or treatment intensity (flat &mdash; see Mix Shift), not capacity (doctor-days up, {_ap_M(b['capacity'])}). The decline is <b>visit volume + collections</b>, not rate or mix.</div>
+  <div class="ap-not"><b>What it&rsquo;s NOT:</b> not pricing (gross-per-procedure held or rose), not procedure mix or treatment intensity (flat &mdash; see Mix Shift), not a capacity shortage (doctor-days <i>rose</i> &mdash; a transitional offset, {_ap_M(b['capacity'])}). The decline is <b>visit volume + collections</b>, not rate or mix.</div>
 
   <div class="ap-toc">
     <div class="ap-toc-h">Go to the detail</div>
@@ -913,6 +928,7 @@ def _audit_tab(apex):
         return ""
     wf = apex["waterfall"]; b = wf["bars"]; total = wf["total"]
     ss = apex["spv"]; th = apex["throughput"]; by = apex["by_bucket"]; cls = apex["classes"]
+    est = apex["established"]                            # live established-provider figures
     y1, y2 = apex["year_1"], apex["year_2"]
     wo = ss["writeoff_component"]                       # positive magnitude of write-off $ lost
     spv_other = b["spv"] + wo                           # residual per-visit (cross-window approx)
@@ -1021,6 +1037,22 @@ def _audit_tab(apex):
             "$/Visit bar &minus; write-off component (approx. residual, cross-window)", vc(spv_other)),
         row("Capacity bar", _ap_M(b["capacity"]), FA, OP, AW,
             "Shapley &mdash; doctor-days deployed (calendar &times; staffing)", vc(b["capacity"])),
+        row("&#8627; Established-provider productivity",
+            f"${est['rate1']:,.0f}&rarr;${est['rate2']:,.0f} <span class='pct'>({est['rate_pct']:+.2f}%)</span>",
+            FA, OP, AW,
+            f"Net production &divide; doctor-day. Population: <b>{est['n_established']}</b> (office, provider) "
+            f"with positive net production in BOTH {y1} &amp; {y2}, temps / placeholders excluded. "
+            f"Total established production {est['np_pct']:+.1f}% on {((est['dd2']/est['dd1']-1)*100):+.1f}% fewer days.", "neg"),
+        row("&#8627; Doctor-day split (est / new-ramp / departed)",
+            f"&minus;{abs(est['split']['established']):,.0f} / +{est['split']['new']:,.0f} / &minus;{abs(est['split']['departed']):,.0f}",
+            FA, OP, AW,
+            f"&Delta; doctor-days by cohort + placeholder/soft {est['split']['placeholder']+est['split']['soft']:+.0f} "
+            f"= net <b>+{est['dd_op_delta']:.0f}</b> ({est['dd_op1']:,.0f}&rarr;{est['dd_op2']:,.0f}) &mdash; reconciles exactly to the Capacity bar.", ""),
+        row("&#8627; Calendar vs doctor-days",
+            f"{est['cal_days1']} = {est['cal_days2']} &nbsp;/&nbsp; +{est['dd_op_delta']:.0f}",
+            FA, OP, AW,
+            "Company working-days (calendar) equal both years &mdash; anchor basis; operating doctor-days "
+            "(staffing) rose &mdash; Capacity basis. Different denominators, not a conflict.", ""),
         row("Portfolio bar", _ap_M(b["portfolio"]), FA, NO, AW,
             f"wind-down + ramp + run-off + dormant YoY &Delta; ({n_nonop} offices)", vc(b["portfolio"])),
         row("New-patient count", f"{th['newpat25']:,.0f}&rarr;{th['newpat26']:,.0f} <span class='pct'>({np_pct:+.1f}%)</span>",
@@ -1600,6 +1632,8 @@ td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
 #tab0 .ap-b-body{font-size:13px;line-height:1.55;color:#333}
 #tab0 .ap-b-body b{color:#1F3864}
 #tab0 .ap-cav{font-size:11px;color:#999;font-style:italic}
+#tab0 .ap-cnt{font-size:11.5px;color:#8a90a0;font-variant-numeric:tabular-nums}
+#tab0 .ap-dag{color:#a8aeba;font-size:9px;margin-left:1px}
 #tab0 .ap-foot{font-size:10.5px;color:#999;font-style:italic;margin-left:4px}
 #tab0 .ap-b-jumps{margin-top:9px;display:flex;gap:8px;flex-wrap:wrap}
 #tab0 .ap-jump{font-size:11.5px;font-weight:600;color:#1F3864;background:#eef3fb;border:0.5px solid #d4e0f0;border-radius:6px;padding:5px 11px;cursor:pointer}
