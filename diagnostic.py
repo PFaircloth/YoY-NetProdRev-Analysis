@@ -275,6 +275,93 @@ def anchor_grid():
     }
 
 
+# Provider names that are NOT clinicians — temp/locum lines, billing placeholders, and
+# office-as-provider stubs. Excluded from the established-provider productivity population
+# so temp days don't masquerade as established labor. Keyword rule, not a hardcoded roster —
+# runs against live data every build.
+_PLACEHOLDER_KEYS = ("TEMP", "LOCUM", "PLACEHOLDER", "AI DOCTOR", "PRACTICE", "SEDATION",
+                     "UNKNOWN", "ASAP", "INSURANCE", "CREDIT", "MARQUEE", "MARQ", "MDP-",
+                     "HOUSE", " OFFICE")
+
+
+def _is_placeholder(provider, office):
+    u = str(provider).upper().strip()
+    if u in ("", "NAN", "NONE") or u == "OFFICE" or u.endswith("OFFICE"):
+        return True
+    if any(k in u for k in _PLACEHOLDER_KEYS):
+        return True
+    t = u.split()
+    if len(t) >= 2 and t[0] == t[-1]:          # doubled token, e.g. PRACTICE PRACTICE
+        return True
+    if u == str(office).upper().strip():        # provider == office
+        return True
+    return False
+
+
+def established_productivity():
+    """LIVE established-provider productivity + doctor-day churn split, operating offices,
+    active (Jan–Jun) window. 'Established' = an (office, provider) with positive NET
+    PRODUCTION in BOTH years, temp/placeholder rows excluded. Every figure re-derives from
+    File A each build — nothing hardcoded. The doctor-day split is an EXACT partition of the
+    operating doctor-day change, so it reconciles to the Capacity Shapley bar by construction.
+
+    NOTE ON MAGNITUDES: the net operating doctor-day change is a small residual of large
+    gross churn — new/ramping days backfilling departures while established providers pull
+    back. 'Capacity up' is net roster churn, not established providers working more."""
+    _, detail = pipeline.load_source_data()      # already Jan–Jun, both years
+    cls = classify_offices()
+    op = [r["office"] for r in cls if r["bucket"] == "operating"]
+    d = detail[detail["OFFICE"].isin(op)].copy()
+    d["_ph"] = [_is_placeholder(p, o) for p, o in zip(d["PROVIDER"], d["OFFICE"])]
+    real = d[~d["_ph"]]
+
+    def _pos(year):
+        g = real[real["year_num"] == year].groupby(["OFFICE", "PROVIDER"])[_NP].sum()
+        return set(g[g > 0].index)
+    act1, act2 = _pos(config.YEAR_1), _pos(config.YEAR_2)
+    established = act1 & act2
+
+    def _bucket(office, provider, ph):
+        if ph:
+            return "placeholder"
+        k = (office, provider)
+        if k in established:
+            return "established"
+        if k in act2:
+            return "new"
+        if k in act1:
+            return "departed"
+        return "soft"
+    d["_b"] = [_bucket(o, p, ph) for o, p, ph in zip(d["OFFICE"], d["PROVIDER"], d["_ph"])]
+
+    def _dd(bucket, year):
+        return float(d[(d["_b"] == bucket) & (d["year_num"] == year)][_DD].sum())
+
+    est = d[d["_b"] == "established"]
+    np1 = float(est[est["year_num"] == config.YEAR_1][_NP].sum())
+    np2 = float(est[est["year_num"] == config.YEAR_2][_NP].sum())
+    dd1 = float(est[est["year_num"] == config.YEAR_1][_DD].sum())
+    dd2 = float(est[est["year_num"] == config.YEAR_2][_DD].sum())
+    r1, r2 = (np1 / dd1 if dd1 else None), (np2 / dd2 if dd2 else None)
+
+    split = {b: (_dd(b, config.YEAR_2) - _dd(b, config.YEAR_1))
+             for b in ("established", "new", "departed", "placeholder", "soft")}
+    dd_op1 = float(d[d["year_num"] == config.YEAR_1][_DD].sum())
+    dd_op2 = float(d[d["year_num"] == config.YEAR_2][_DD].sum())
+
+    con = pipeline.build_consolidated()["checkpoints"][-1]
+    return {
+        "n_established": len(established),
+        "np1": np1, "np2": np2, "dd1": dd1, "dd2": dd2,
+        "rate1": r1, "rate2": r2,
+        "rate_pct": ((r2 / r1 - 1) * 100 if r1 else None),
+        "np_pct": ((np2 / np1 - 1) * 100 if np1 else None),
+        "split": split,                                   # Δ doctor-days by bucket
+        "dd_op1": dd_op1, "dd_op2": dd_op2, "dd_op_delta": dd_op2 - dd_op1,
+        "cal_days1": con["wd25"], "cal_days2": con["wd26"],
+    }
+
+
 def apex_payload(dataset=None):
     """Everything the Diagnostic apex + Portfolio tabs need — bundled, all live-derived,
     keyed so report.py only formats. `dataset` is the already-built dollar dataset."""
@@ -293,6 +380,7 @@ def apex_payload(dataset=None):
         "classes": cls,
         "by_bucket": by,
         "anchor": anchor_grid(),
+        "established": established_productivity(),
         "year_1": config.YEAR_1, "year_2": config.YEAR_2,
     }
 
