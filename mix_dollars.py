@@ -32,6 +32,7 @@ import pipeline
 from mix_pipeline import (
     GROUP_ORDER, PROC_GROUPS, COL_OFFICE, COL_PROVIDER, COL_VISITS, COL_DATE,
     MIX_FILE, MIX_SHEET, load_mix, rendered_pairs, _normalize_dax_name,
+    mix_active_months,
 )
 
 # --- group -> list of (gross, adj_corrected, net_corrected) column triples ----
@@ -49,10 +50,19 @@ def _num(series):
 
 
 def _windows():
-    active = pipeline.get_active_months()
+    active = mix_active_months()
     mtd = config.MTD_MONTH if config.MTD_MONTH in active else None
     closed = [m for m in active if m != mtd]
     return active, closed, mtd
+
+
+def _win_label(months):
+    """Format a month list as a compact range label, e.g. [1..6] -> 'Jan–Jun'.
+    Derived from the actual window so it can't drift from the data (was hardcoded)."""
+    if not months:
+        return "—"
+    lo, hi = pipeline.MONTH_LABELS[months[0]], pipeline.MONTH_LABELS[months[-1]]
+    return lo if lo == hi else f"{lo}–{hi}"
 
 
 def _all_dollar_cols():
@@ -73,7 +83,7 @@ def load_full_extract():
     dt = pd.to_datetime(df[COL_DATE], errors="raise")
     df["year_num"] = dt.dt.year.astype(int)
     df["month_num"] = dt.dt.month.astype(int)
-    active = pipeline.get_active_months()
+    active = mix_active_months()
     df = df[df["month_num"].isin(active) & df["year_num"].isin([config.YEAR_1, config.YEAR_2])].copy()
     for c in _all_dollar_cols():
         df[c] = _num(df[c])
@@ -285,7 +295,7 @@ def realization_diagnostic(dataset=None, entity=None, scope=None):
         "headline": headline, "rows": rows,
         "meta": {
             "scope": scope or "rendered material contributors",
-            "window": "closed Jan–May (matched, both years), corrected $",
+            "window": f"closed {_win_label(_windows()[1])} (matched, both years), corrected $",
             "year_1": config.YEAR_1, "year_2": config.YEAR_2,
         },
     }

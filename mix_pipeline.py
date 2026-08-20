@@ -97,6 +97,34 @@ def validate_columns(df):
     return True, col_to_groups, empty_cols
 
 
+_mix_active_months = None
+
+
+def mix_active_months():
+    """Month window for the procedure-mix / write-off layer: the months present in
+    BOTH analysis years *within File X* (the DAX ProcedureMix extract). This is the
+    mix-side analogue of pipeline.get_active_months() (which reads File A, net-prod).
+
+    File X can lag File A — e.g. File A carries complete-July net-prod while File X
+    has not been refreshed past June. If the mix layer borrowed File A's window it
+    would pull a month present in only one year of File X (real 2025-July vs empty
+    2026-July) and fabricate a phantom collapse in the write-off / realization rates.
+    Clamping to File X's own both-year intersection keeps the mix side honest.
+
+    Self-healing: when File X gains July 2026, the intersection extends to include
+    July automatically — no manual un-clamping needed."""
+    global _mix_active_months
+    if _mix_active_months is None:
+        df = pd.read_excel(MIX_FILE, sheet_name=MIX_SHEET)
+        dt = pd.to_datetime(df[COL_DATE], errors="raise")
+        yr = dt.dt.year.astype(int)
+        mn = dt.dt.month.astype(int)
+        y1 = set(mn[yr == config.YEAR_1])
+        y2 = set(mn[yr == config.YEAR_2])
+        _mix_active_months = sorted(y1 & y2)
+    return _mix_active_months
+
+
 def load_mix():
     df = pd.read_excel(MIX_FILE, sheet_name=MIX_SHEET)
     ok, col_to_groups, empty_cols = validate_columns(df)
@@ -105,7 +133,7 @@ def load_mix():
     df["year_num"] = dt.dt.year.astype(int)
     df["month_num"] = dt.dt.month.astype(int)
 
-    months = pipeline.get_active_months()
+    months = mix_active_months()
     mask = df["month_num"].isin(months) & df["year_num"].isin([config.YEAR_1, config.YEAR_2])
     df = df[mask].copy()
 
@@ -187,7 +215,7 @@ def _aggregate_population(rows_list, months):
 
 def build_mix_dataset():
     df, col_to_groups, empty_cols, null_named = load_mix()
-    months = pipeline.get_active_months()
+    months = mix_active_months()
     pairs = rendered_pairs()
 
     # office-scoped name index
