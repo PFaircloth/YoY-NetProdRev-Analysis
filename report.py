@@ -2,6 +2,7 @@ import json
 import calendar
 import config
 import pipeline
+import mix_pipeline
 from mix_dollars import (realization_diagnostic, tag_for, monthly_realization_trend,
                          monthly_realization_by_office)
 import diagnostic
@@ -11,6 +12,15 @@ import diagnostic
 # All helpers fall back to the original date-less "MTD" wording when ThroughDate is absent.
 _THRU = {"raw": None, "display": None, "ordinal": None, "day": None}
 _MTD_ON = False   # set once in generate_html(); True only when the latest active month is partial
+
+# ── Mix through-date (procedure-mix / write-off as-of) — set ONCE in generate_html().
+# File X (DAX ProcedureMix) can lag File A (net-prod). When it does, the mix/write-off
+# surfaces carry a through-<Mon> banner (_MIX_NOTE) + inline chip (_MIX_INLINE) so a
+# reader can't misread a June mix figure as July. Both are '' when the two windows align
+# (self-healing: the banners vanish once File X catches up). _MIX_THRU is the display date.
+_MIX_THRU = ""
+_MIX_NOTE = ""
+_MIX_INLINE = ""
 
 
 def _mtd_suffix():
@@ -573,7 +583,7 @@ def _realization_tab(dollar_dataset):
     return ('<!-- ═══════════════════════════════════════════════════\n'
             '     TAB 6 — REALIZATION (procedure $ / write-off diagnostic; office slicer)\n'
             '════════════════════════════════════════════════════ -->\n'
-            f'<div id="tab6" style="display:none">{slicer}\n{"".join(panes)}</div>\n')
+            f'<div id="tab6" style="display:none">{_MIX_NOTE}\n{slicer}\n{"".join(panes)}</div>\n')
 
 
 # ── APEX — Diagnostic waterfall (new FIRST tab) + Portfolio tab ────────────────
@@ -794,7 +804,7 @@ def _apex_tab(apex):
 
     <div class="ap-bucket" style="border-left-color:{_AP_REV}">
       <div class="ap-b-top"><span class="ap-b-amt">{_ap_M(b['spv'])}</span><span class="ap-b-title">$/Visit &mdash; net revenue per visit</span><span class="ap-b-owner" style="background:{_AP_REV}">Owner: Rev cycle + Ops</span></div>
-      <div class="ap-b-body">Each visit is worth less. <b>Approximately {_ap_k(-abs(wo))}</b> of this is the <b>write-off rate rising {dwo_pt:+.1f}pt</b> since January (collections, structural). The remaining <b>~{_ap_k(spv_other)}</b> is other per-visit movement &mdash; softening in procedures such as <b>Ortho ({_pp('Ortho','d_net_per')}/proc)</b> and <b>Endo ({_pp('Endo','d_net_per')}/proc)</b>. {_RZ_CAV} <span class="ap-cav">(write-off piece is the closed-window Realization figure; $/Visit is the active-window office figure &mdash; an honest approximate component across two windows.)</span></div>
+      <div class="ap-b-body">Each visit is worth less. <b>Approximately {_ap_k(-abs(wo))}</b> of this is the <b>write-off rate rising {dwo_pt:+.1f}pt</b>{_MIX_INLINE} since January (collections, structural). The remaining <b>~{_ap_k(spv_other)}</b> is other per-visit movement &mdash; softening in procedures such as <b>Ortho ({_pp('Ortho','d_net_per')}/proc)</b> and <b>Endo ({_pp('Endo','d_net_per')}/proc)</b>. {_RZ_CAV} <span class="ap-cav">(write-off piece is the closed-window Realization figure; $/Visit is the active-window office figure &mdash; an honest approximate component across two windows.)</span></div>
       <div class="ap-b-jumps">{_ap_jump(6,'Write-offs &middot; Realization')}{_ap_jump(5,'Mix / intensity &middot; Mix Shift')}</div>
     </div>
 
@@ -1347,6 +1357,28 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
     global _THRU
     _THRU = pipeline.get_through_date()
     asof = f" &mdash; data through {_THRU['display']}" if _THRU["display"] else ""
+
+    # Mix through-date + lag banner. mix_active_months() is File X's own both-year window;
+    # when its last month trails File A's, the mix/write-off tabs are a month (or more)
+    # behind — flag it explicitly. Self-healing: banners go empty once File X catches up.
+    global _MIX_THRU, _MIX_NOTE, _MIX_INLINE
+    _mix_months = mix_pipeline.mix_active_months()
+    _mix_last = _mix_months[-1]
+    _MIX_THRU = (f"{calendar.month_name[_mix_last]} "
+                 f"{calendar.monthrange(config.YEAR_2, _mix_last)[1]}, {config.YEAR_2}")
+    _missing = [m for m in months if m > _mix_last]
+    if _missing:
+        _gap_mon = calendar.month_name[_missing[0]]
+        _net_thru = _THRU["display"] or f"{pipeline.MONTH_LABELS[months[-1]]} {config.YEAR_2}"
+        _MIX_NOTE = (
+            '<div class="mix-thru-note"><b>Procedure-mix and write-off data are through '
+            f'{_MIX_THRU}.</b> The source (DAX&nbsp;ProcedureMix) has not yet been updated '
+            f'for {_gap_mon}; net-production figures elsewhere are through {_net_thru}.</div>')
+        _MIX_INLINE = (f' <span class="mix-thru-inline">(through {calendar.month_name[_mix_last]} '
+                       f'&mdash; procedure-mix source pending {_gap_mon} update)</span>')
+    else:
+        _MIX_NOTE = ""
+        _MIX_INLINE = ""
     mtd_chip = (f"thru {_THRU['day']}" if _THRU["day"] else "MTD")   # compact JS column chip
     mtd_display = _THRU["display"] or ""
 
@@ -1368,6 +1400,7 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
     html = html.replace("__PD_DATA__",    PD_json)
     html = html.replace("__DS_DATA__",    DS_json)
     html = html.replace("__MIX_DATA__",   MIX_json)
+    html = html.replace("__MIX_THRU_NOTE__", _MIX_NOTE)
     html = html.replace("__CONSOLIDATED_DATA__", CONS_json)
     html = html.replace("__T2_OPTIONS__", t2_opts)
     html = html.replace("__NPROV__",      str(n_prov))
@@ -1771,6 +1804,11 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   .drill-grid{grid-template-columns:repeat(2,1fr)}
 }
 /* Tab 5 — Mix Shift (procedure composition per 100 visits; layout from mock, palette from dashboard) */
+/* Through-June freeze notice: mix/write-off surfaces lag net-prod when File X trails File A */
+.mix-thru-note{background:#fff7e6;border:1px solid #f0c674;border-left:4px solid #d99a1c;
+  color:#7a5610;border-radius:8px;padding:10px 14px;margin:0 2px 14px;font-size:12.5px;line-height:1.5}
+.mix-thru-note b{color:#5c3f0a}
+.mix-thru-inline{color:#9a6a10;font-style:italic;font-weight:400;white-space:nowrap}
 #tab5{--t5-navy:#1F3864;--t5-line:#e2e8f0;--t5-ink:#1f2a44;--t5-soft:#5a6b85;--t5-faint:#94a3b8;
   --t5-zebra:#f5f8fc;--t5-up:#1a7a4a;--t5-up-bg:#e6f4ec;--t5-down:#C0392B;--t5-down-bg:#fbecea;--t5-accent:#2E4D8A}
 #tab5 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
@@ -2123,6 +2161,7 @@ __APEX_TAB__
      TAB 5 — MIX SHIFT
 ════════════════════════════════════════════════════ -->
 <div id="tab5" style="display:none">
+  __MIX_THRU_NOTE__
   <div class="card">
     <div class="ctrl-row">
       <label>State:</label>
