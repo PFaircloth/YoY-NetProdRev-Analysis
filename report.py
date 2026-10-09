@@ -789,6 +789,7 @@ def _apex_tab(apex):
     <div style="margin-top:3px">Per-procedure figures, where noted, come from the material-contributor detail &mdash; the only level at which procedure-level data exists.</div>
     <div style="margin-top:3px;color:#9aa0ad"><sup>&dagger;</sup> New-patient and hygiene visit counts are sourced from the Tredence Company Summary Report (File&nbsp;A).</div>
   </div>
+{_monthly_mirror()}
 {_apex_anchor_grid(apex.get("anchor"), total)}
   <div class="card ap-hero">
     <div class="section-lbl">Where the ${abs(total)/1e6:.1f}M went &mdash; production decline, by owner</div>
@@ -1314,6 +1315,102 @@ def _t2_options(office_data):
     return "\n".join(lines)
 
 
+# ── Monthly Revenue schedule ────────────────────────────────────────────────
+# All-in, standalone-per-month net production. Live-derived from the SUMMARY rows
+# (same basis as the waterfall/headline), so offices → company → the headline all foot,
+# and the month set flexes with get_active_months() — Oct, Nov… appear on roll-forward.
+
+def _mrev_lvl(v):
+    """Whole-dollar level cell (no sign)."""
+    return (("&minus;$" + f"{abs(v):,.0f}") if v < 0 else ("$" + f"{v:,.0f}"))
+
+
+def _mrev_sd(v):
+    """Signed whole-dollar Δ cell."""
+    return ("&minus;$" if v < 0 else "+$") + f"{abs(v):,.0f}"
+
+
+def _mrev_data():
+    summary_df, _ = pipeline.load_source_data()
+    months = pipeline.get_active_months()
+    labels = [pipeline.MONTH_LABELS[m] for m in months]
+    y1, y2 = config.YEAR_1, config.YEAR_2
+
+    def row(df):
+        return [float(df[df["month_num"] == m]["NET PRODUCTION"].sum()) for m in months]
+
+    comp1 = row(summary_df[summary_df["year_num"] == y1])
+    comp2 = row(summary_df[summary_df["year_num"] == y2])
+    offices = []
+    for name in sorted(summary_df["OFFICE"].unique(), key=lambda s: str(s).lower()):
+        od = summary_df[summary_df["OFFICE"] == name]
+        offices.append((name, row(od[od["year_num"] == y1]), row(od[od["year_num"] == y2])))
+    return months, labels, comp1, comp2, offices, y1, y2
+
+
+def _mrev_block(head, v1, v2, y1, y2):
+    """One office/company block: a spanning name row + 2025 / 2026 / Δ rows. Δ cells are
+    coloured per-cell (red = down, green = up)."""
+    n = len(v1); t1, t2 = sum(v1), sum(v2)
+    s = [f'<tr class="mrev-oh"><th colspan="{n + 2}">{head}</th></tr>']
+    for lbl, vals, tot in ((str(y1), v1, t1), (str(y2), v2, t2)):
+        cells = "".join(f"<td>{_mrev_lvl(x)}</td>" for x in vals)
+        s.append(f'<tr class="mrev-lvl"><th>{lbl}</th>{cells}'
+                 f'<td class="mrev-tot">{_mrev_lvl(tot)}</td></tr>')
+    dc = ""
+    for i in range(n):
+        d = v2[i] - v1[i]
+        cls = "mrev-neg" if d < 0 else ("mrev-pos" if d > 0 else "mrev-zero")
+        dc += f'<td class="{cls}">{_mrev_sd(d)}</td>'
+    dt = t2 - t1
+    dtc = "mrev-neg" if dt < 0 else ("mrev-pos" if dt > 0 else "mrev-zero")
+    s.append(f'<tr class="mrev-delta"><th>&Delta;</th>{dc}'
+             f'<td class="mrev-tot {dtc}">{_mrev_sd(dt)}</td></tr>')
+    return "".join(s)
+
+
+def _mrev_head(labels):
+    return ('<thead><tr><th class="mrev-rowhdr"></th>'
+            + "".join(f"<th>{l}</th>" for l in labels)
+            + '<th class="mrev-tot">Total</th></tr></thead>')
+
+
+def _monthly_navtab():
+    return ('\n  <button class="nav-tab" id="navTab9" onclick="switchTab(9)">'
+            '&#128197; Monthly Revenue</button>')
+
+
+def _monthly_tab():
+    months, labels, comp1, comp2, offices, y1, y2 = _mrev_data()
+    dt = sum(comp2) - sum(comp1)
+    comp = _mrev_block(f"Company &mdash; all-in ({len(offices)} offices)", comp1, comp2, y1, y2)
+    offrows = "".join(_mrev_block(nm.replace("&", "&amp;"), v1, v2, y1, y2)
+                      for nm, v1, v2 in offices)
+    return f"""
+<div id="tab9" style="display:none">
+  <div class="section-lbl">Monthly Revenue &mdash; net production by month, {labels[0]}&ndash;{labels[-1]} {y1} vs {y2}</div>
+  <div class="mrev-note">All-in basis (every office, each month&rsquo;s own total &mdash; not cumulative). Offices sum to company; the company &Delta; foots to the {_ap_M1(dt)} headline. Live-derived from source &mdash; new months appear automatically on rebuild.</div>
+  <div class="mrev-scroll">
+    <table class="mrev">
+      {_mrev_head(labels)}
+      <tbody class="mrev-companytb">{comp}</tbody>
+      <tbody class="mrev-offtb" id="mrevOffices" hidden>{offrows}</tbody>
+    </table>
+  </div>
+  <button class="mrev-toggle" id="mrevToggle" data-n="{len(offices)}" onclick="mrevToggle()" aria-expanded="false">Show offices ({len(offices)}) &#9656;</button>
+</div>"""
+
+
+def _monthly_mirror():
+    """Compact company-only block mirrored at the top of the Diagnostic tab."""
+    months, labels, comp1, comp2, offices, y1, y2 = _mrev_data()
+    comp = _mrev_block("Company &mdash; monthly net production", comp1, comp2, y1, y2)
+    return (f'<div class="card mrev-mirror"><div class="section-lbl">Monthly net production '
+            f'&mdash; the facts {_ap_jump(9, "Full schedule + offices")}</div>'
+            f'<div class="mrev-scroll"><table class="mrev mrev-compact">{_mrev_head(labels)}'
+            f'<tbody class="mrev-companytb">{comp}</tbody></table></div></div>')
+
+
 # ── HTML generation ───────────────────────────────────────────────────────────
 
 def generate_html(office_data, provider_data, data_summary, mix_dataset=None, consolidated=None,
@@ -1437,6 +1534,8 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
     html = html.replace("__PORTFOLIO_TAB__", _portfolio_tab(apex))
     html = html.replace("__AUDIT_NAVTAB__", _audit_navtab(apex))
     html = html.replace("__AUDIT_TAB__", _audit_tab(apex))
+    html = html.replace("__MONTHLY_NAVTAB__", _monthly_navtab())
+    html = html.replace("__MONTHLY_TAB__", _monthly_tab())
     html = html.replace("__MIX_DOLLARS_DATA__",
                         json.dumps(_mix_dollars_payload(dollar_dataset),
                                    ensure_ascii=False, separators=(",", ":")))
@@ -1465,6 +1564,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;fo
 .nav-tab:last-child{border-right:none}
 .nav-tab.on{background:#1F3864;color:#fff}
 .nav-tab:hover:not(.on){background:#f5f7fa;color:#1F3864}
+/* Monthly Revenue schedule */
+.mrev-scroll{overflow-x:auto;margin:6px 0 10px;border:0.5px solid #e6e9f0;border-radius:8px}
+table.mrev{border-collapse:collapse;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;min-width:100%}
+table.mrev th,table.mrev td{padding:4px 11px;text-align:right;border-bottom:0.5px solid #eef0f4}
+table.mrev thead th{position:sticky;top:0;background:#1F3864;color:#fff;font-weight:600;z-index:1}
+table.mrev thead th.mrev-rowhdr{text-align:left}
+table.mrev tbody th{text-align:left;color:#555;font-weight:500}
+tr.mrev-oh th{background:#eef2f8;color:#1F3864;font-weight:700;text-align:left;border-top:0.5px solid #d8deea}
+tr.mrev-delta th{font-weight:700;color:#1F3864}
+td.mrev-tot,th.mrev-tot{font-weight:700;border-left:0.5px solid #d8deea;background:#fafbfd}
+.mrev-neg{color:#C0392B}
+.mrev-pos{color:#1a7a4a}
+.mrev-zero{color:#9aa0ad}
+.mrev-toggle{font-size:12px;font-weight:600;color:#1F3864;background:#eef1f7;border:0.5px solid #d8deea;border-radius:6px;padding:7px 14px;cursor:pointer}
+.mrev-toggle:hover{background:#e2e8f3}
+.mrev-note{font-size:11px;line-height:1.5;color:#7a8190;background:#f7f8fb;border:0.5px solid #e6e9f0;border-radius:6px;padding:8px 12px;margin:0 0 8px}
+.mrev-mirror{margin:0 0 14px}
+table.mrev-compact{font-size:11.5px}
 /* KPI row */
 .scope-bar{background:#2E4D8A;color:#fff;font-size:11px;padding:5px 14px;border-radius:6px;margin-bottom:8px;font-weight:500;display:none}
 .kpis{display:grid;gap:10px;margin-bottom:14px}
@@ -1930,7 +2047,7 @@ td.pname{text-align:left;font-weight:600;color:#1F3864;font-size:11px}
   <button class="nav-tab" id="navTab2" onclick="switchTab(2)">&#128101; Provider Deep Dive</button>
   <button class="nav-tab" id="navTab3" onclick="switchTab(3)">&#128202; Doctor Rank View</button>
   <button class="nav-tab" id="navTab4" onclick="switchTab(4)">&#128203; Data Summary</button>
-  <button class="nav-tab" id="navTab5" onclick="switchTab(5)">&#128138; Mix Shift</button>__REALIZATION_NAVTAB____PORTFOLIO_NAVTAB____AUDIT_NAVTAB__
+  <button class="nav-tab" id="navTab5" onclick="switchTab(5)">&#128138; Mix Shift</button>__REALIZATION_NAVTAB____PORTFOLIO_NAVTAB____AUDIT_NAVTAB____MONTHLY_NAVTAB__
 </div>
 __APEX_TAB__
 <!-- ═══════════════════════════════════════════════════
@@ -2202,6 +2319,7 @@ __APEX_TAB__
 __REALIZATION_TAB__
 __PORTFOLIO_TAB__
 __AUDIT_TAB__
+__MONTHLY_TAB__
 <div class="footer">Generated from source data &mdash; __RANGE__ &mdash; 76 offices &mdash; Provider threshold: 90% production + 2% floor &mdash; Noise providers excluded</div>
 </div>
 
@@ -3325,6 +3443,7 @@ function switchTab(n){
   var _t6=document.getElementById('tab6'); if(_t6){_t6.style.display=n===6?'':'none';}
   var _t7=document.getElementById('tab7'); if(_t7){_t7.style.display=n===7?'':'none';}
   var _t8=document.getElementById('tab8'); if(_t8){_t8.style.display=n===8?'':'none';}
+  var _t9=document.getElementById('tab9'); if(_t9){_t9.style.display=n===9?'':'none';}
   var _n0=document.getElementById('navTab0'); if(_n0){_n0.className='nav-tab'+(n===0?' on':'');}
   document.getElementById('navTab1').className='nav-tab'+(n===1?' on':'');
   document.getElementById('navTab2').className='nav-tab'+(n===2?' on':'');
@@ -3334,6 +3453,19 @@ function switchTab(n){
   var _n6=document.getElementById('navTab6'); if(_n6){_n6.className='nav-tab'+(n===6?' on':'');}
   var _n7=document.getElementById('navTab7'); if(_n7){_n7.className='nav-tab'+(n===7?' on':'');}
   var _n8=document.getElementById('navTab8'); if(_n8){_n8.className='nav-tab'+(n===8?' on':'');}
+  var _n9=document.getElementById('navTab9'); if(_n9){_n9.className='nav-tab'+(n===9?' on':'');}
+}
+
+// Monthly Revenue — expand/collapse the alphabetical per-office blocks.
+function mrevToggle(){
+  var b=document.getElementById('mrevOffices'); if(!b){return;}
+  var open=b.hidden;            // currently hidden => about to open
+  b.hidden=!open;
+  var btn=document.getElementById('mrevToggle');
+  if(btn){
+    btn.setAttribute('aria-expanded',open?'true':'false');
+    btn.innerHTML=open?('Hide offices ▾'):('Show offices ('+(btn.getAttribute('data-n')||'')+') ▸');
+  }
 }
 
 // Realization tab office slicer — show the selected pre-rendered pane (table + KPIs +
