@@ -1,4 +1,3 @@
-ANALYSIS_PERIOD = "Jan–May 2025 vs Jan–May 2026"
 YEAR_1 = 2025
 YEAR_2 = 2026
 # The active month set is DERIVED FROM THE DATA — see pipeline.get_active_months(),
@@ -25,6 +24,10 @@ WORKING_DAYS = {
     (5, 2026): 17.0,
     (6, 2026): 19.6,   # full June (Tredence Company Summary Report)
     (7, 2026): 19.6,   # full July 2026 (Tredence Company Summary Report)
+    (8, 2025): 18.0,   # full August 2025 (Tredence Company Summary Report)
+    (8, 2026): 18.6,   # full August 2026 (Tredence Company Summary Report)
+    (9, 2025): 18.6,   # full September 2025 (Tredence Company Summary Report)
+    (9, 2026): 18.6,   # full September 2026 (Tredence Company Summary Report)
 }
 
 # Set to (month_num, year, days_passed) when a month is in progress
