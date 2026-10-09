@@ -1368,7 +1368,11 @@ def generate_html(office_data, provider_data, data_summary, mix_dataset=None, co
                  f"{calendar.monthrange(config.YEAR_2, _mix_last)[1]}, {config.YEAR_2}")
     _missing = [m for m in months if m > _mix_last]
     if _missing:
-        _gap_mon = calendar.month_name[_missing[0]]
+        # Span of all months the mix source is behind (e.g. "Jul&ndash;Sep"), not just the
+        # first — so the banner reads the full gap honestly when net-prod runs several
+        # months ahead of File X. Collapses to a single month when only one is missing.
+        _gap_mon = (calendar.month_abbr[_missing[0]] if len(_missing) == 1
+                    else f"{calendar.month_abbr[_missing[0]]}&ndash;{calendar.month_abbr[_missing[-1]]}")
         _net_thru = _THRU["display"] or f"{pipeline.MONTH_LABELS[months[-1]]} {config.YEAR_2}"
         _MIX_NOTE = (
             '<div class="mix-thru-note"><b>Procedure-mix and write-off data are through '
