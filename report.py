@@ -1614,6 +1614,14 @@ td{padding:5px 5px;text-align:center;font-size:11px;border-bottom:0.5px solid #f
 td.l{text-align:left;font-weight:600;color:#222}
 td.st{text-align:left;font-size:10px;color:#888;font-weight:400}
 td.rk{text-align:center;font-size:10px;color:#aaa;width:28px}
+/* Month value cells never wrap — the newest column also carries a trend arrow, so without
+   nowrap it was the one that broke "&minus;$6,769" onto two lines. Office/provider name may
+   still wrap. Each hm table keeps a per-month min-width (set live from the month count) and its
+   wrapper scrolls horizontally when the viewport is narrower, so spacing stays uniform for any
+   number of months (Oct, Nov… on roll-forward). */
+table.hm tr.dr>td{white-space:nowrap}
+table.hm tr.dr>td.l{white-space:normal}
+#t1Wrap,#t2Wrap,#t3Wrap{overflow-x:auto}
 /* Arrows */
 .arrow{font-size:11px;color:#aaa;margin-left:4px;display:inline-block;transition:transform .15s}
 .arrow.open{transform:rotate(90deg)}
@@ -2332,6 +2340,9 @@ var MTD_ON=__MTD_ACTIVE__;       // true when the latest active month is month-t
 var WD25=__WD25__,WD26=__WD26__;
 function lastCp(c){return c[c.length-1];}                         // latest YTD checkpoint
 function moHeaders(){return MO.map(function(m){return '<th>YTD '+m+'</th>';}).join('');}
+// Min table width so every month column stays uniform and roomy no matter how many months
+// are present; the wrapper scrolls when the viewport is narrower. Presentation only.
+function hmMinW(){return 360+MO.length*90;}
 function mtdBanner(){return MTD_ON?'<div>&#9888; '+MTD_LABEL+(MTD_DISPLAY?' (data through '+MTD_DISPLAY+')':' (MTD)')+' is a partial month &mdash; KPI cards, YTD totals, and ordering include a month-to-date figure, not a full month.</div>':'';}
 
 var D=__D_DATA__;
@@ -2617,7 +2628,7 @@ function renderT1(){
       +'<tr class="drill-wrap" id="d'+ckey+'" style="display:none"><td colspan="'+(3+MO.length)+'"><div id="dc'+ckey+'"></div></td></tr>';
   }
 
-  document.getElementById('t1Wrap').innerHTML='<table class="hm">'+thead+'<tbody>'+pinned+rows+'</tbody></table>';
+  document.getElementById('t1Wrap').innerHTML='<table class="hm" style="min-width:'+hmMinW()+'px">'+thead+'<tbody>'+pinned+rows+'</tbody></table>';
 
   var trs=document.getElementById('t1Wrap').querySelectorAll('tr.dr');
   var cdata=data;
@@ -2761,7 +2772,7 @@ function renderT2(){
       +ocells+'<td></td><td></td><td></td></tr>';
   }
 
-  document.getElementById('t2Wrap').innerHTML='<div class="section-lbl">'+officeName+' &mdash; '+provs.length+' named providers</div><table class="pt hm">'+thead+'<tbody>'+rows+'</tbody></table>';
+  document.getElementById('t2Wrap').innerHTML='<div class="section-lbl">'+officeName+' &mdash; '+provs.length+' named providers</div><table class="pt hm" style="min-width:'+hmMinW()+'px">'+thead+'<tbody>'+rows+'</tbody></table>';
 
   var trs=document.getElementById('t2Wrap').querySelectorAll('tr.dr');
   var cprovs=provs;
@@ -2907,7 +2918,7 @@ function renderT3(){
     document.getElementById('t3Wrap').innerHTML='<div class="empty-state"><div class="icon">&#128269;</div><p>No providers match the current filters</p></div>';
     return;
   }
-  document.getElementById('t3Wrap').innerHTML='<table class="hm">'+thead+'<tbody>'+rows+'</tbody></table>';
+  document.getElementById('t3Wrap').innerHTML='<table class="hm" style="min-width:'+hmMinW()+'px">'+thead+'<tbody>'+rows+'</tbody></table>';
 
   var trs=document.getElementById('t3Wrap').querySelectorAll('tr.dr');
   var cdata=data;
