@@ -649,10 +649,17 @@ def _apex_waterfall_svg(b, total):
         px, pyv = x + bw, ya
     cx = L + (n - 0.5) * slot
     yt, x = Y(total), cx - bw / 2
-    s.append(f'<rect x="{x:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{yt-y0:.1f}" rx="2" fill="{_AP_NAVY}"/>')
-    s.append(f'<text x="{cx:.1f}" y="{yt+18:.1f}" class="wf-val" fill="{_AP_NAVY}">{_ap_M1(total)}</text>')
+    # Total is an ENDPOINT, not a bar back to $0. Render it as a thick horizontal marker at
+    # the total's live y-level (Y(total)) — the running sum lands here, the "floor". No solid
+    # fill up to the axis, which misreads as a recovery to zero. Marker spans slightly wider
+    # than a bar; the y-position follows the computed total on every rebuild (nothing hardcoded).
+    mw = bw * 1.28
+    mx1, mx2 = cx - mw / 2, cx + mw / 2
+    s.append(f'<line x1="{mx1:.1f}" y1="{yt:.1f}" x2="{mx2:.1f}" y2="{yt:.1f}" '
+             f'stroke="{_AP_NAVY}" stroke-width="5" stroke-linecap="round"/>')
+    s.append(f'<text x="{cx:.1f}" y="{yt-9:.1f}" class="wf-val" fill="{_AP_NAVY}">{_ap_M1(total)}</text>')
     s.append(f'<text x="{cx:.1f}" y="{H-B+22:.1f}" class="wf-cat wf-tot">Total</text>')
-    s.append(f'<line x1="{px:.1f}" y1="{pyv:.1f}" x2="{x:.1f}" y2="{pyv:.1f}" class="wf-conn"/>')
+    s.append(f'<line x1="{px:.1f}" y1="{pyv:.1f}" x2="{mx1:.1f}" y2="{yt:.1f}" class="wf-conn"/>')
     s.append('</svg>')
     return "".join(s)
 
