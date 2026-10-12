@@ -1663,6 +1663,7 @@ table.hm tr.dr>td.l{white-space:normal}
 .badge-hyg{background:#d1fae5;color:#065f46}
 .badge-spec{background:#ede9fe;color:#5b21b6}
 .badge-new{background:#fef3c7;color:#92400e}
+.badge-na{background:#fde68a;color:#854d0e;border:0.5px solid #d4a72c}
 .badge-other{background:#f3f4f6;color:#6b7280}
 .trend-up{color:#1a7a4a;font-size:12px;font-weight:700;margin-left:4px}
 .trend-dn{color:#C0392B;font-size:12px;font-weight:700;margin-left:4px}
@@ -2258,6 +2259,7 @@ __APEX_TAB__
         <span class="tl-item"><span class="badge badge-hyg">Hygienist</span></span>
         <span class="tl-item"><span class="badge badge-spec">Specialist</span></span>
         <span class="tl-item"><span class="badge badge-new">NEW</span></span>
+        <span class="tl-item"><span class="badge badge-na" title="&#39;Not Active&#39; = minimal 2026 Rev/Day (&lt;$250/day), fewer than 10 new patients, and no meaningful production in the latest month &mdash; a revenue-based inference, not an HR status.">Not Active</span></span>
         <span class="tl-div"></span>
         <span class="tl-lbl">YTD __LASTMO__ trend:</span>
         <span class="tl-item"><span class="trend-up">&#8593;</span> Improving</span>
@@ -2829,6 +2831,18 @@ function togT2Prov(pkey,prov){
 var DOCTOR_TYPES={'General Dentist':1,'Prosthodontist':1,'Oral Surgeon':1,'Periodontist':1,'Orthodontist':1,'Pedodontist':1,'Endodontist':1};
 var T3_DOCTOR_COUNT=PR_ALL.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];}).length;
 var PR_DOCTORS=PR_ALL.filter(function(r){return r.ptype&&DOCTOR_TYPES[r.ptype];});
+// "Not Active" — revenue-based inference, live-derived, doctors only. Uses the report's
+// rd26 (Rev/Day the view displays). The recency test uses the LATEST month in the data
+// (last two checkpoints), so it advances automatically (Sep -> Oct -> Nov ...) each rebuild.
+var NA_NOTE="'Not Active' = minimal 2026 Rev/Day (<$250/day), fewer than 10 new patients, and no meaningful production in the latest month — a revenue-based inference, not an HR status.";
+function isNotActive(cps){
+  if(!cps||!cps.length)return false;
+  var last=cps[cps.length-1];
+  var prev=cps.length>1?cps[cps.length-2]:null;
+  var rd=last.rpd2026, npc=last.nps2026;
+  var latestNet=(last.np2026||0)-((prev&&prev.np2026!=null)?prev.np2026:0);
+  return (rd!=null&&rd<250)&&(npc<10)&&(latestNet<500);
+}
 function getT3Data(){
   var show=document.getElementById('t3Show').value;
   var state=document.getElementById('t3State').value;
@@ -2904,6 +2918,7 @@ function renderT3(){
       badges+='<span class="badge '+bc+'">'+r.ptype+'</span>';
     }
     if(r.isNew)badges+='<span class="badge badge-new">NEW</span>';
+    if(isNotActive(r.checkpoints))badges+='<span class="badge badge-na" title="'+NA_NOTE+'">Not Active</span>';
     var key='t3_'+i;
     rows+='<tr class="dr" data-key="'+key+'" data-idx="'+i+'">'
       +'<td class="rk">'+(i+1)+'</td>'
@@ -2954,6 +2969,7 @@ function togT3(key,r){
       badges+='<span class="badge '+bc+'">'+r.ptype+'</span>';
     }
     if(r.isNew)badges+='<span class="badge badge-new">NEW</span>';
+    if(isNotActive(r.checkpoints))badges+='<span class="badge badge-na" title="'+NA_NOTE+'">Not Active</span>';
     var html='<div class="prov-drill-inner">'
       +'<div class="prov-drill-title">'+r.provider+badges+' <span style="color:#888;font-weight:400">&mdash; '+r.office+(r.state&&r.state!=='&mdash;'?' ('+r.state+')':'')+'</span></div>'
       +'<div class="leg-row">'
